@@ -36,18 +36,24 @@ def create_phishing_site(phishing_site: PhishingSiteCreate):
     try:
         now = datetime.utcnow().isoformat()
         
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO phishing_site (url, reason, description, status, created_at)
             VALUES (%s, %s, %s, %s, %s)
-        """, (phishing_site.url, phishing_site.reason, phishing_site.description, "검토중", now))
-        phishing_site_id = cursor.fetchone()[0] if cursor.description else None
-        
+            RETURNING id
+            """,
+            (phishing_site.url, phishing_site.reason, phishing_site.description, "검토중", now)
+        )
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to insert phishing site.")
+        phishing_site_id = result[0]
         conn.commit()
-        
         # 생성된 피싱 사이트 조회
         cursor.execute("SELECT * FROM phishing_site WHERE id = %s", (phishing_site_id,))
         site_row = cursor.fetchone()
-        
+        if not site_row:
+            raise HTTPException(status_code=500, detail="Inserted phishing site not found.")
         return PhishingSiteResponse(
             id=site_row[0],
             url=site_row[1],
@@ -159,7 +165,8 @@ def update_phishing_site(site_id: int, site_update: PhishingSiteUpdate):
         # 업데이트된 피싱 사이트 조회
         cursor.execute("SELECT * FROM phishing_site WHERE id = %s", (site_id,))
         site_row = cursor.fetchone()
-        
+        if not site_row:
+            raise HTTPException(status_code=404, detail="Phishing site not found")
         return PhishingSiteResponse(
             id=site_row[0],
             url=site_row[1],
