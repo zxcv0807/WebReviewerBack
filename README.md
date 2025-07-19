@@ -9,10 +9,10 @@
    pip install -r requirements.txt
    ```
 
-2. Supabase(PostgreSQL) 데이터베이스 준비:
+2. Supabase 준비:
    - [Supabase 웹사이트](https://app.supabase.com/)에서 프로젝트를 생성합니다.
-   - **Settings > Database**에서 DB 접속 정보를 확인합니다.
-   - **Table Editor** 또는 **SQL Editor**에서 아래 쿼리로 테이블을 생성합니다.
+   - **Project Settings > API**에서 `SUPABASE_URL`과 `SUPABASE_ANON_KEY`를 확인합니다.
+   - **Table Editor** 또는 **SQL Editor**에서 아래 예시처럼 테이블을 생성합니다.
 
    ```sql
    -- 예시: review, review_comment 테이블
@@ -34,16 +34,17 @@
        created_at TIMESTAMP NOT NULL
    );
    ```
-   - 실제 사용 테이블 구조는 프로젝트에 맞게 추가 생성하세요.
+   - 실제 사용 테이블 구조는 프로젝트에 맞게 추가/생성하세요.
 
 3. 환경변수(.env) 파일 생성:
-   프로젝트 루트(backend)에 `.env` 파일을 만들고 아래와 같이 입력합니다.
+   프로젝트 루트(backend)에 `.env` 파일을 만들고 아래처럼 입력하세요.
    ```env
-   DB_HOST=your_supabase_host
-   DB_NAME=your_db_name
-   DB_USER=your_db_user
-   DB_PASSWORD=your_db_password
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_ANON_KEY=your_supabase_anon_key
+   SECRET_KEY=your_jwt_secret
+   ALGORITHM=HS256
    ```
+   - 기존 DB_HOST, DB_NAME 등은 필요 없습니다.
 
 4. 서버 실행:
    ```bash
@@ -89,3 +90,8 @@
   "description": "페이스북 로그인 페이지를 위장한 피싱 사이트"
 }
 ```
+
+## 중요 안내 (Supabase 무료 플랜)
+- 무료 플랜에서는 PostgreSQL에 직접 접속(5432 포트)이 불가능합니다.
+- 반드시 Supabase Python SDK(`supabase-py`)를 사용해야 하며, 이미 본 프로젝트는 SDK 기반으로 동작합니다.
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`는 반드시 .env에 입력해야 합니다.

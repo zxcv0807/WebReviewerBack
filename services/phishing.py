@@ -1,9 +1,15 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
-from .db import get_db
-import json
+from supabase import create_client, Client
+import os
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 router = APIRouter()
 
@@ -30,181 +36,64 @@ class PhishingSiteResponse(BaseModel):
 # API Endpoints
 @router.post("/phishing-sites", response_model=PhishingSiteResponse)
 def create_phishing_site(phishing_site: PhishingSiteCreate):
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    try:
-        now = datetime.utcnow().isoformat()
-        
-        cursor.execute(
-            """
-            INSERT INTO phishing_site (url, reason, description, status, created_at)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (phishing_site.url, phishing_site.reason, phishing_site.description, "검토중", now)
-        )
-        result = cursor.fetchone()
-        if not result:
-            raise HTTPException(status_code=500, detail="Failed to insert phishing site.")
-        phishing_site_id = result[0]
-        conn.commit()
-        # 생성된 피싱 사이트 조회
-        cursor.execute("SELECT * FROM phishing_site WHERE id = %s", (phishing_site_id,))
-        site_row = cursor.fetchone()
-        if not site_row:
-            raise HTTPException(status_code=500, detail="Inserted phishing site not found.")
-        return PhishingSiteResponse(
-            id=site_row[0],
-            url=site_row[1],
-            reason=site_row[2],
-            description=site_row[3],
-            status=site_row[4],
-            created_at=site_row[5]
-        )
-        
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create phishing site report: {str(e)}")
-    finally:
-        conn.close()
+    now = datetime.utcnow().isoformat()
+    result = supabase.table("phishing_site").insert({
+        "url": phishing_site.url,
+        "reason": phishing_site.reason,
+        "description": phishing_site.description,
+        "status": "검토중",
+        "created_at": now
+    }).execute()
+    phishing_site_id = result.data[0]["id"]
+    site_row = supabase.table("phishing_site").select("*").eq("id", phishing_site_id).single().execute().data
+    return PhishingSiteResponse(**site_row)
 
 @router.get("/phishing-sites", response_model=List[PhishingSiteResponse])
 def get_phishing_sites(status: Optional[str] = None):
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    try:
-        if status:
-            cursor.execute("SELECT * FROM phishing_site WHERE status = %s ORDER BY created_at DESC", (status,))
-        else:
-            cursor.execute("SELECT * FROM phishing_site ORDER BY created_at DESC")
-        
-        sites = []
-        for site_row in cursor.fetchall():
-            sites.append(PhishingSiteResponse(
-                id=site_row[0],
-                url=site_row[1],
-                reason=site_row[2],
-                description=site_row[3],
-                status=site_row[4],
-                created_at=site_row[5]
-            ))
-        
-        return sites
-        
-    finally:
-        conn.close()
+    if status:
+        sites = supabase.table("phishing_site").select("*").eq("status", status).order("created_at", desc=True).execute().data
+    else:
+        sites = supabase.table("phishing_site").select("*").order("created_at", desc=True).execute().data
+    return [PhishingSiteResponse(**site) for site in sites]
 
 @router.get("/phishing-sites/{site_id}", response_model=PhishingSiteResponse)
 def get_phishing_site(site_id: int):
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("SELECT * FROM phishing_site WHERE id = %s", (site_id,))
-        site_row = cursor.fetchone()
-        
-        if not site_row:
-            raise HTTPException(status_code=404, detail="Phishing site not found")
-        
-        return PhishingSiteResponse(
-            id=site_row[0],
-            url=site_row[1],
-            reason=site_row[2],
-            description=site_row[3],
-            status=site_row[4],
-            created_at=site_row[5]
-        )
-        
-    finally:
-        conn.close()
+    site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
+    if not site_row:
+        raise HTTPException(status_code=404, detail="Phishing site not found")
+    return PhishingSiteResponse(**site_row)
 
 @router.put("/phishing-sites/{site_id}", response_model=PhishingSiteResponse)
 def update_phishing_site(site_id: int, site_update: PhishingSiteUpdate):
-    conn = get_db()
-    cursor = conn.cursor()
-    
+    existing_site = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
+    if not existing_site:
+        raise HTTPException(status_code=404, detail="Phishing site not found")
+    update_data = {}
+    if site_update.url is not None:
+        update_data["url"] = site_update.url
+    if site_update.reason is not None:
+        update_data["reason"] = site_update.reason
+    if site_update.description is not None:
+        update_data["description"] = site_update.description
+    if site_update.status is not None:
+        update_data["status"] = site_update.status
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update fields provided")
     try:
-        # 기존 피싱 사이트 확인
-        cursor.execute("SELECT * FROM phishing_site WHERE id = %s", (site_id,))
-        existing_site = cursor.fetchone()
-        
-        if not existing_site:
-            raise HTTPException(status_code=404, detail="Phishing site not found")
-        
-        # 업데이트할 필드들
-        update_fields = []
-        update_values = []
-        
-        if site_update.url is not None:
-            update_fields.append("url = %s")
-            update_values.append(site_update.url)
-        
-        if site_update.reason is not None:
-            update_fields.append("reason = %s")
-            update_values.append(site_update.reason)
-        
-        if site_update.description is not None:
-            update_fields.append("description = %s")
-            update_values.append(site_update.description)
-        
-        if site_update.status is not None:
-            update_fields.append("status = %s")
-            update_values.append(site_update.status)
-        
-        if update_fields:
-            update_values.append(site_id)
-            
-            cursor.execute(
-                f"UPDATE phishing_site SET {', '.join(update_fields)} WHERE id = %s",
-                update_values
-            )
-            conn.commit()
-        
-        # 업데이트된 피싱 사이트 조회
-        cursor.execute("SELECT * FROM phishing_site WHERE id = %s", (site_id,))
-        site_row = cursor.fetchone()
+        supabase.table("phishing_site").update(update_data).eq("id", site_id).execute()
+        site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
         if not site_row:
-            raise HTTPException(status_code=404, detail="Phishing site not found")
-        return PhishingSiteResponse(
-            id=site_row[0],
-            url=site_row[1],
-            reason=site_row[2],
-            description=site_row[3],
-            status=site_row[4],
-            created_at=site_row[5]
-        )
-        
-    except HTTPException:
-        raise
+            raise HTTPException(status_code=404, detail="Phishing site not found after update")
+        return PhishingSiteResponse(**site_row)
     except Exception as e:
-        conn.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update phishing site: {str(e)}")
-    finally:
-        conn.close()
 
 @router.delete("/phishing-sites/{site_id}")
 def delete_phishing_site(site_id: int):
-    conn = get_db()
-    cursor = conn.cursor()
-    
+    if not supabase.table("phishing_site").select("id").eq("id", site_id).single().execute().data:
+        raise HTTPException(status_code=404, detail="Phishing site not found")
     try:
-        # 피싱 사이트 존재 확인
-        cursor.execute("SELECT id FROM phishing_site WHERE id = %s", (site_id,))
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Phishing site not found")
-        
-        # 피싱 사이트 삭제
-        cursor.execute("DELETE FROM phishing_site WHERE id = %s", (site_id,))
-        conn.commit()
-        
+        supabase.table("phishing_site").delete().eq("id", site_id).execute()
         return {"msg": "Phishing site deleted successfully"}
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete phishing site: {str(e)}")
-    finally:
-        conn.close() 
+        raise HTTPException(status_code=500, detail=f"Failed to delete phishing site: {str(e)}") 
