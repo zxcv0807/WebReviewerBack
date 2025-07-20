@@ -6,6 +6,7 @@ from services.image import router as image_router
 from services.review import router as review_router
 from services.phishing import router as phishing_router
 from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 app = FastAPI()
 
@@ -28,4 +29,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/")
 def read_root():
-    return {"message": "Backend is running"} 
+    return {"message": "Backend is running"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

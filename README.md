@@ -15,26 +15,75 @@
    - **Table Editor** 또는 **SQL Editor**에서 아래 예시처럼 테이블을 생성합니다.
 
    ```sql
-   -- 예시: review, review_comment 테이블
+   -- User 테이블 (Google OAuth 2.0 지원)
+   CREATE TABLE "user" (
+       id SERIAL PRIMARY KEY,
+       username TEXT NOT NULL UNIQUE,
+       email TEXT NOT NULL UNIQUE,
+       password_hash TEXT,
+       google_id TEXT UNIQUE,
+       role TEXT NOT NULL DEFAULT 'user',
+       created_at TIMESTAMP NOT NULL DEFAULT NOW()
+   );
+
+   -- Post 테이블
+   CREATE TABLE post (
+       id SERIAL PRIMARY KEY,
+       title TEXT NOT NULL,
+       category TEXT NOT NULL,
+       content TEXT NOT NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+       updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+       user_id INTEGER NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+       user_name TEXT NOT NULL
+   );
+
+   -- Tag 테이블
+   CREATE TABLE tag (
+       id SERIAL PRIMARY KEY,
+       name TEXT NOT NULL,
+       post_id INTEGER NOT NULL REFERENCES post(id) ON DELETE CASCADE
+   );
+
+   -- Image 테이블
+   CREATE TABLE image (
+       id SERIAL PRIMARY KEY,
+       url TEXT NOT NULL,
+       filename TEXT NOT NULL,
+       uploaded_at TIMESTAMP NOT NULL DEFAULT NOW()
+   );
+
+   -- Review 테이블
    CREATE TABLE review (
        id SERIAL PRIMARY KEY,
        site_name TEXT NOT NULL,
-       url TEXT NOT NULL,
+       url TEXT NOT NULL UNIQUE,
        summary TEXT NOT NULL,
        rating DOUBLE PRECISION NOT NULL CHECK (rating >= 0 AND rating <= 5),
        pros TEXT NOT NULL,
        cons TEXT NOT NULL,
-       created_at TIMESTAMP NOT NULL
+       created_at TIMESTAMP NOT NULL DEFAULT NOW()
    );
 
+   -- Review Comment 테이블
    CREATE TABLE review_comment (
        id SERIAL PRIMARY KEY,
        review_id INTEGER NOT NULL REFERENCES review(id) ON DELETE CASCADE,
        content TEXT NOT NULL,
-       created_at TIMESTAMP NOT NULL
+       created_at TIMESTAMP NOT NULL DEFAULT NOW()
+   );
+
+   -- Phishing Site 테이블
+   CREATE TABLE phishing_site (
+       id SERIAL PRIMARY KEY,
+       url TEXT NOT NULL,
+       reason TEXT NOT NULL,
+       description TEXT NOT NULL,
+       status TEXT NOT NULL DEFAULT '검토중',
+       created_at TIMESTAMP NOT NULL DEFAULT NOW()
    );
    ```
-   - 실제 사용 테이블 구조는 프로젝트에 맞게 추가/생성하세요.
+   - 위의 모든 테이블을 Supabase SQL Editor에서 실행하세요.
 
 3. 환경변수(.env) 파일 생성:
    프로젝트 루트(backend)에 `.env` 파일을 만들고 아래처럼 입력하세요.
@@ -43,8 +92,13 @@
    SUPABASE_ANON_KEY=your_supabase_anon_key
    SECRET_KEY=your_jwt_secret
    ALGORITHM=HS256
+   
+   # Google OAuth 2.0 설정
+   GOOGLE_CLIENT_ID=963128153800-njiad73pc1l3lbch8o9bf8ifk3kr6ui4.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=your_google_client_secret_here
    ```
    - 기존 DB_HOST, DB_NAME 등은 필요 없습니다.
+   - Google OAuth 2.0을 사용하려면 Google Cloud Console에서 클라이언트 시크릿을 생성하고 설정해야 합니다.
 
 4. 서버 실행:
    ```bash
@@ -54,6 +108,15 @@
 서버는 http://127.0.0.1:8000 에서 시작됩니다.
 
 ## API Endpoints
+
+### Authentication
+- `POST /auth/signup` - 회원가입
+- `POST /auth/login` - 로그인
+- `POST /auth/google/callback` - Google OAuth 2.0 콜백 (Authorization Code Flow)
+- `POST /auth/refresh` - 토큰 갱신
+- `POST /auth/logout` - 로그아웃
+- `GET /auth/me` - 현재 사용자 정보
+- `GET /auth/admin/only` - 관리자 전용 엔드포인트
 
 ### Reviews
 - `POST /api/reviews` - 리뷰 등록
@@ -69,6 +132,14 @@
 - `GET /api/phishing-sites/{site_id}` - 특정 피싱 사이트 조회
 - `PUT /api/phishing-sites/{site_id}` - 피싱 사이트 수정
 - `DELETE /api/phishing-sites/{site_id}` - 피싱 사이트 삭제
+
+### Google OAuth 2.0 Callback Schema
+```json
+{
+  "code": "authorization_code_from_google",
+  "redirect_uri": "http://localhost:5173/callback"
+}
+```
 
 ### Review Schema
 ```json
