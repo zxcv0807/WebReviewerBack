@@ -14,21 +14,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
       
-      # 머신 상태 확인 및 정리
-      - name: Check and cleanup machines
+      # 배포 실행 (리스 충돌 방지 옵션 포함)
+      - name: Deploy to Fly.io
         run: |
-          # 모든 머신을 중지
-          flyctl machines stop --all || true
-          sleep 5
-          # 모든 머신을 삭제
-          flyctl machines destroy --all --force || true
-          sleep 10
+          # 배포 전 상태 확인
+          flyctl status || true
+          # 안전한 배포 실행
+          flyctl deploy --remote-only --strategy=rolling --wait-timeout=300
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        continue-on-error: true
-      
-      # 배포 실행
-      - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
+        
+      # 배포 실패 시 재시도 (선택적)
+      - name: Retry deployment if failed
+        if: failure()
+        run: |
+          echo "First deployment failed, retrying..."
+          sleep 30
+          flyctl deploy --remote-only --strategy=immediate
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

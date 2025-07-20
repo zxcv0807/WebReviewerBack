@@ -15,6 +15,10 @@ primary_region = 'nrt'
   auto_start_machines = true
   min_machines_running = 0
   processes = ['app']
+  # 리스 충돌 방지를 위한 설정
+  concurrency = { type = "connections", hard_limit = 25, soft_limit = 20 }
 
 [[vm]]
   size = 'shared-cpu-1x'
+  # 머신 재시작 정책 설정
+  restart = { policy = "on-failure" }
