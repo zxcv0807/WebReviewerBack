@@ -13,6 +13,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only
+      
+      # 머신 상태 확인 및 정리
+      - name: Check and cleanup machines
+        run: |
+          # 모든 머신을 중지
+          flyctl machines stop --all || true
+          sleep 5
+          # 모든 머신을 삭제
+          flyctl machines destroy --all --force || true
+          sleep 10
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        continue-on-error: true
+      
+      # 배포 실행
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
