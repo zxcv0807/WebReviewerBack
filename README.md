@@ -137,7 +137,22 @@
 ```json
 {
   "code": "authorization_code_from_google",
-  "redirect_uri": "http://localhost:5173/callback"
+  "redirect_uri": "http://localhost:5173/callback",
+  "state": "optional_state_parameter"
+}
+```
+
+**응답 형식:**
+```json
+{
+  "access_token": "jwt_token",
+  "token_type": "bearer",
+  "user": {
+    "id": 1,
+    "username": "user_name",
+    "email": "user@example.com",
+    "role": "user"
+  }
 }
 ```
 

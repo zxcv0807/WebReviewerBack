@@ -107,6 +107,7 @@ class UserLogin(BaseModel):
 class GoogleCallbackRequest(BaseModel):
     code: str
     redirect_uri: str
+    state: Optional[str] = None  # state 파라미터 추가 (선택적)
 
 @router.post("/signup")
 def signup(user: UserCreate):
@@ -177,6 +178,8 @@ async def google_callback(request: GoogleCallbackRequest, response: Response):
         raise HTTPException(status_code=500, detail="Google OAuth is not configured")
     
     try:
+        print(f"Received Google OAuth callback - code: {request.code[:10]}..., redirect_uri: {request.redirect_uri}")
+        
         # 1. Authorization code를 access token으로 교환
         token_data = {
             "client_id": GOOGLE_CLIENT_ID,
@@ -186,20 +189,32 @@ async def google_callback(request: GoogleCallbackRequest, response: Response):
             "redirect_uri": request.redirect_uri
         }
         
+        print(f"Exchanging authorization code for access token...")
         token_response = requests.post(GOOGLE_TOKEN_URL, data=token_data)
+        print(f"Token exchange response status: {token_response.status_code}")
+        
         if token_response.status_code != 200:
-            error_detail = token_response.json().get("error_description", "Unknown error")
+            error_response = token_response.json()
+            error_detail = error_response.get("error_description", error_response.get("error", "Unknown error"))
+            print(f"Token exchange failed: {error_detail}")
             raise HTTPException(status_code=400, detail=f"Failed to exchange authorization code: {error_detail}")
         
         token_info = token_response.json()
         google_access_token = token_info.get("access_token")
         if not google_access_token:
+            print("No access token received from Google")
             raise HTTPException(status_code=400, detail="No access token received from Google")
         
+        print("Successfully received access token from Google")
+        
         # 2. Access token으로 사용자 정보 가져오기
+        print("Getting user info from Google...")
         headers = {"Authorization": f"Bearer {google_access_token}"}
         userinfo_response = requests.get(GOOGLE_USERINFO_URL, headers=headers)
+        print(f"User info response status: {userinfo_response.status_code}")
+        
         if userinfo_response.status_code != 200:
+            print(f"Failed to get user info: {userinfo_response.text}")
             raise HTTPException(status_code=400, detail="Failed to get user info from Google")
         
         user_info = userinfo_response.json()
@@ -207,7 +222,10 @@ async def google_callback(request: GoogleCallbackRequest, response: Response):
         email = user_info.get("email")
         name = user_info.get("name")
         
+        print(f"User info received - email: {email}, name: {name}")
+        
         if not google_id or not email:
+            print("Invalid user info from Google")
             raise HTTPException(status_code=400, detail="Invalid user info from Google")
         
         # 3. 사용자명 생성 (이메일에서 추출하거나 Google 이름 사용)
@@ -267,6 +285,7 @@ async def google_callback(request: GoogleCallbackRequest, response: Response):
             max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
         )
         
+        print(f"Google OAuth login successful for user: {user_row['username']}")
         return {
             "access_token": jwt_access_token,
             "token_type": "bearer",
