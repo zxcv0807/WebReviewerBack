@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel
 from supabase import create_client, Client
+import requests
+from fastapi import Request
 
 load_dotenv()
 _secret = os.getenv("SECRET_KEY")
@@ -27,6 +29,8 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -113,6 +117,54 @@ def login(user: UserLogin, response: Response):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not user_row or not verify_password(user.password, user_row["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
+    access_token = create_access_token(data={"sub": user_row["username"], "role": user_row["role"]})
+    refresh_token = create_refresh_token(data={"sub": user_row["username"], "role": user_row["role"]})
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
+
+@router.post("/login/google")
+async def google_login(request: Request, response: Response):
+    data = await request.json()
+    id_token = data.get("id_token")
+    if not id_token:
+        raise HTTPException(status_code=400, detail="id_token is required")
+
+    # 1. 구글 id_token 검증 및 사용자 정보 획득
+    token_info = requests.get(GOOGLE_TOKEN_INFO_URL, params={"id_token": id_token}).json()
+    if "error_description" in token_info or "sub" not in token_info:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+    google_id = token_info["sub"]
+    email = token_info["email"]
+    username = token_info.get("name") or email.split("@")[0]
+
+    # 2. user 테이블에서 google_id로 사용자 조회
+    user_row = supabase.table("user").select("*").eq("google_id", google_id).single().execute().data
+    if not user_row:
+        # 신규 사용자 생성
+        created_at = datetime.utcnow().isoformat()
+        insert_result = supabase.table("user").insert({
+            "username": username,
+            "email": email,
+            "google_id": google_id,
+            "password_hash": None,
+            "created_at": created_at,
+            "role": "user"
+        }).execute()
+        user_row = insert_result.data[0] if insert_result.data else None
+        if not user_row:
+            raise HTTPException(status_code=500, detail="User creation failed")
+
+    # 3. JWT 발급
     access_token = create_access_token(data={"sub": user_row["username"], "role": user_row["role"]})
     refresh_token = create_refresh_token(data={"sub": user_row["username"], "role": user_row["role"]})
     response.set_cookie(
