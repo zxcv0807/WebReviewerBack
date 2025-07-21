@@ -64,10 +64,6 @@ class ReviewWithCommentsResponse(BaseModel):
 # API Endpoints
 @router.post("/reviews", response_model=ReviewResponse)
 def create_review(review: ReviewCreate):
-    # 중복 체크: url이 이미 존재하면 에러 반환
-    exists = supabase.table("review").select("id").eq("url", review.url).execute().data
-    if exists:
-        raise HTTPException(status_code=400, detail="이미 리뷰가 등록된 사이트입니다.")
     now = datetime.utcnow().isoformat()
     review_result = supabase.table("review").insert({
         "site_name": review.site_name,
