@@ -18,9 +18,8 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, EmailStr, validator
-from supabase import create_client, Client
+from .db import supabase
 import requests
-from fastapi import Request
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -41,12 +40,6 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))  # 
 # 쿠키 보안 설정
 COOKIE_SECURE = os.getenv("ENVIRONMENT", "development") == "production"
 
-# Supabase 데이터베이스 연결 설정
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # Google OAuth 2.0 설정
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")

@@ -49,7 +49,7 @@ app.include_router(post_router, prefix="/posts", tags=["Posts"])  # 자유게시
 app.include_router(review_router, prefix="/api", tags=["Reviews"])  # 웹사이트 리뷰 (별점/댓글/평균 계산)
 app.include_router(phishing_router, prefix="/api", tags=["Phishing Sites"])  # 피싱 사이트 신고 및 관리
 app.include_router(image_router, tags=["File Upload"])  # 이미지 업로드/조회
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")  # uploads/ 폴더의 파일을 URL로 접근 가능
+# uploads 폴더는 Supabase Storage로 대체되어 제거됨
 
 # 기본 라우트
 @app.get("/", tags=["Root"])

@@ -2,8 +2,10 @@ fastapi
 uvicorn
 python-dotenv
 supabase 
+storage3
 python-jose
 passlib
 bcrypt==3.2.2
 python-multipart 
 requests
+Pillow
