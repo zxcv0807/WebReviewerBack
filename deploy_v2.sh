@@ -1,20 +1,25 @@
 #!/bin/bash
 
-# 에러 발생 시 스크립트 중단
 set -e
 
 echo "🚀 새로운 버전의 배포를 시작합니다..."
 
-# 1. Git 저장소의 코드로 로컬 변경사항을 강제 초기화합니다.
-echo "➡️ 1. 로컬 코드를 원격 저장소 기준으로 초기화합니다 (git reset)..."
+echo "➡️ 1. 로컬 변경사항을 임시 저장하고 작업 공간을 초기화합니다..."
+# 추적되지 않는 파일을 포함한 모든 변경사항을 임시 저장
+git stash
+# 원격 저장소의 코드로 강제 초기화
 git reset --hard HEAD
 
-# 2. 최신 코드를 가져옵니다.
 echo "➡️ 2. 최신 코드를 가져옵니다 (git pull)..."
 git pull
 
-# 3. 기존에 실행 중인 컨테이너를 중지하고 삭제합니다.
 echo "➡️ 3. 기존 컨테이너를 중지합니다 (docker-compose down)..."
 sudo docker-compose down
 
-# ... (이하 동일) ...
+echo "➡️ 4. 새로운 이미지를 빌드합니다 (docker-compose build)..."
+sudo docker-compose build
+
+echo "➡️ 5. 새로운 컨테이너를 시작합니다 (docker-compose up -d)..."
+sudo docker-compose up -d
+
+echo "✅ 배포가 성공적으로 완료되었습니다!"
