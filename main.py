@@ -55,7 +55,7 @@ app.include_router(image_router, tags=["File Upload"])  # 이미지 업로드/�
 @app.get("/", tags=["Root"])
 def read_root():
     return {
-        "message": "Web Rating Backend API",
+        "message": "Web Rating Backend API Test",
         "version": "1.0.0",
         "docs": "/docs",
         "status": "running"
