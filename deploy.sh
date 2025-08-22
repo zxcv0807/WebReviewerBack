@@ -1,11 +1,12 @@
 #!/bin/bash
 
-# AWS EC2 배포 스크립트
+# AWS EC2 + Load Balancer 배포 스크립트
+# AWS ALB(Application Load Balancer) 환경에 최적화됨
 # 사용법: ./deploy.sh
 
 set -e  # 오류 시 스크립트 중단
 
-echo "🚀 AWS EC2 배포 시작..."
+echo "🚀 AWS EC2 + ALB 환경 배포 시작..."
 
 # 색상 코드
 RED='\033[0;31m'
