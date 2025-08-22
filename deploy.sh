@@ -58,41 +58,6 @@ setup_docker() {
     echo -e "${GREEN}✅ Docker 설정 완료${NC}"
 }
 
-# SSL 인증서 설정
-setup_ssl() {
-    echo -e "${BLUE}🔒 SSL 인증서 설정 중...${NC}"
-    
-    # SSL 디렉토리 생성
-    sudo mkdir -p /etc/nginx/ssl
-    
-    # 자체 서명된 인증서 생성 (프로덕션에서는 Let's Encrypt 사용 권장)
-    if [ ! -f /etc/nginx/ssl/cert.pem ]; then
-        echo -e "${YELLOW}🔑 자체 서명된 SSL 인증서 생성 중...${NC}"
-        sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout /etc/nginx/ssl/key.pem \
-            -out /etc/nginx/ssl/cert.pem \
-            -subj "/C=KR/ST=Seoul/L=Seoul/O=WebRating/CN=localhost"
-    fi
-    
-    echo -e "${GREEN}✅ SSL 인증서 설정 완료${NC}"
-}
-
-# 방화벽 설정
-setup_firewall() {
-    echo -e "${BLUE}🔥 방화벽 설정 중...${NC}"
-    
-    # UFW 설치 및 설정
-    if command -v ufw &> /dev/null; then
-        sudo ufw --force enable
-        sudo ufw allow ssh
-        sudo ufw allow 80/tcp
-        sudo ufw allow 443/tcp
-        echo -e "${GREEN}✅ 방화벽 설정 완료${NC}"
-    else
-        echo -e "${YELLOW}⚠️  UFW가 설치되지 않았습니다. 수동으로 방화벽을 설정하세요.${NC}"
-    fi
-}
-
 # 애플리케이션 배포
 deploy_app() {
     echo -e "${BLUE}🚀 애플리케이션 배포 중...${NC}"
@@ -145,9 +110,10 @@ health_check() {
 completion_message() {
     echo -e "\n${GREEN}🎉 배포 완료!${NC}"
     echo -e "${BLUE}📋 서비스 정보:${NC}"
-    echo -e "  • 웹 서비스: https://$(curl -s ifconfig.me || echo 'YOUR_SERVER_IP')"
-    echo -e "  • API 문서: https://$(curl -s ifconfig.me || echo 'YOUR_SERVER_IP')/docs"
-    echo -e "  • 헬스체크: https://$(curl -s ifconfig.me || echo 'YOUR_SERVER_IP')/health"
+    echo -e "  • 웹 서비스: http://$(curl -s ifconfig.me || echo 'YOUR_SERVER_IP')"
+    echo -e "  • API 문서: http://$(curl -s ifconfig.me || echo 'YOUR_SERVER_IP')/docs"
+    echo -e "  • 헬스체크: http://$(curl -s ifconfig.me || echo 'YOUR_SERVER_IP')/health"
+    echo -e "  • HTTPS: AWS Load Balancer"
     echo -e "\n${YELLOW}📊 모니터링:${NC}"
     echo -e "  • 로그 확인: docker-compose logs -f"
     echo -e "  • 서비스 상태: docker-compose ps"
@@ -161,8 +127,6 @@ main() {
     
     check_env
     setup_docker
-    setup_ssl
-    setup_firewall
     deploy_app
     health_check
     completion_message

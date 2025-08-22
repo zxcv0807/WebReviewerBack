@@ -86,22 +86,24 @@ LOG_LEVEL=INFO
 
 ## 🔒 SSL 인증서 설정
 
-### Let's Encrypt 사용 (권장)
+### AWS 관리형 SSL 사용 (권장)
+AWS에서 SSL 인증서를 관리하므로 별도 설정이 불필요합니다:
+
+1. **Application Load Balancer (ALB) 사용**:
+   - ALB에 SSL 인증서 연결
+   - EC2 인스턴스는 HTTP(80)만 처리
+   - ALB가 HTTPS 종료 담당
+
+2. **CloudFront 사용**:
+   - CloudFront에 SSL 인증서 연결  
+   - Origin(EC2)은 HTTP로 통신
+   - CloudFront가 HTTPS 종료 담당
+
+### 수동 SSL 설정 (필요시에만)
 ```bash
-# Certbot 설치
+# Let's Encrypt 사용 (직접 도메인 연결시)
 sudo apt install -y certbot
-
-# 인증서 발급 (도메인이 있는 경우)
 sudo certbot certonly --standalone -d yourdomain.com
-
-# Nginx 설정에서 인증서 경로 수정
-sudo nano nginx.conf
-# ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-# ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
-# 자동 갱신 설정
-sudo crontab -e
-# 0 12 * * * /usr/bin/certbot renew --quiet
 ```
 
 ## 📊 모니터링 및 로그
@@ -206,13 +208,15 @@ docker-compose logs web
 docker-compose config
 ```
 
-#### 2. SSL 인증서 오류
+#### 2. HTTP 연결 문제
 ```bash
-# 인증서 경로 확인
-ls -la /etc/nginx/ssl/
+# 포트 80 확인
+sudo netstat -tulpn | grep :80
 
 # Nginx 설정 테스트
 docker exec nginx nginx -t
+
+# ALB/CloudFront 설정 확인 (AWS 콘솔에서)
 ```
 
 #### 3. 데이터베이스 연결 오류

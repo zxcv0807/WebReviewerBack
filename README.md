@@ -252,7 +252,6 @@ backend/
 ├── main.py              # FastAPI 애플리케이션 엔트리포인트
 ├── requirements.txt     # Python 의존성
 ├── Dockerfile          # Docker 컨테이너 설정
-├── fly.toml            # Fly.io 배포 설정
 ├── uploads/            # 업로드된 파일 저장소
 ├── services/           # 비즈니스 로직 모듈
 │   ├── auth.py         # 사용자 인증 및 권한 관리
@@ -267,7 +266,7 @@ backend/
 ## 배포 정보
 
 - **프론트엔드**: Vercel (https://webreviewer.vercel.app)
-- **백엔드**: Fly.io 또는 로컬 개발 환경
+- **백엔드**: AWS EC2 (SSL 인증 완료)
 - **데이터베이스**: Supabase (PostgreSQL)
 
 ## 중요 안내 (Supabase 무료 플랜)
