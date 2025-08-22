@@ -28,4 +28,5 @@ jobs:
           key: ${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}
           script: |
             cd ~/WebReviewerBack
+            chmod +x ./deploy_v2.sh
             ./deploy_v2.sh
