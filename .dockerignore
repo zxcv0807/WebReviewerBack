@@ -1,74 +1,32 @@
-# Git
+# Git 저장소
 .git
 .gitignore
 
-# Python
-__pycache__
+# Python 캐시
+__pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-env
-pip-log.txt
-pip-delete-this-directory.txt
-.tox
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.venv/
+services/__pycache__/
+
+# 가상환경 (Docker에서 새로 생성)
 venv/
 
-# Development
+# 환경변수 (docker-compose에서 주입)
 .env
-.env.local
-.env.development
-.env.test
-.env.production
-*.env
-.envrc
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Logs
+# 로그 파일 (Docker에서 새로 생성)  
 logs/
-*.log
 
-# Uploads (now using Supabase Storage)
+# 업로드 폴더 (Supabase Storage 사용)
 uploads/
 
-# Documentation
+# 문서 파일 (런타임에 불필요)
 README.md
 CLAUDE.md
-*.md
 
-# Docker
+# Docker 설정 파일들
 Dockerfile
 docker-compose.yml
 .dockerignore
 
-# Deployment
-deploy.sh
-fly.toml
-
-# SSL certificates
-ssl/
-*.pem
-*.key
+# 배포 스크립트
+deploy_v2.sh

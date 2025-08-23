@@ -1,6 +1,14 @@
+# 환경변수 파일 (민감한 정보 포함)
 .env
+
+# 가상환경
 venv/
+
+# Python 캐시 파일
 __pycache__/
 *.pyc
 services/__pycache__/
-uploads/
+
+# 로그 파일
+logs/
+

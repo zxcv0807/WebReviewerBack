@@ -90,21 +90,41 @@
 3. 환경변수(.env) 파일 생성:
    프로젝트 루트(backend)에 `.env` 파일을 만들고 아래처럼 입력하세요.
    ```env
+   # Supabase 설정
    SUPABASE_URL=your_supabase_url
    SUPABASE_ANON_KEY=your_supabase_anon_key
+   
+   # JWT 설정
    SECRET_KEY=your_jwt_secret
    ALGORITHM=HS256
+   ACCESS_TOKEN_EXPIRE_MINUTES=30
+   REFRESH_TOKEN_EXPIRE_DAYS=7
    
    # Google OAuth 2.0 설정
    GOOGLE_CLIENT_ID=963128153800-njiad73pc1l3lbch8o9bf8ifk3kr6ui4.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+   
+   # CORS 설정
+   CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://webreviewer.vercel.app
+   
+   # 애플리케이션 설정
+   ENVIRONMENT=production
+   LOG_LEVEL=INFO
    ```
    - 기존 DB_HOST, DB_NAME 등은 필요 없습니다.
    - Google OAuth 2.0을 사용하려면 Google Cloud Console에서 클라이언트 시크릿을 생성하고 설정해야 합니다.
+   - `CORS_ORIGINS`에는 허용할 프론트엔드 도메인을 쉼표로 구분하여 입력하세요.
 
 4. 서버 실행:
+   
+   **개발 환경**:
    ```bash
    uvicorn main:app --reload
+   ```
+   
+   **프로덕션 환경 (Docker Compose)**:
+   ```bash
+   ./deploy_v2.sh
    ```
 
 서버는 http://127.0.0.1:8000 에서 시작됩니다.
@@ -245,6 +265,12 @@
 ### Environment Management
 - **python-dotenv** - 환경변수 관리
 
+### Deployment & Infrastructure
+- **Docker** - 컨테이너화
+- **Docker Compose** - 멀티 컨테이너 오케스트레이션
+- **Nginx** - 리버스 프록시 및 웹 서버
+- **AWS EC2** - 클라우드 서버 호스팅
+
 ## 프로젝트 구조
 
 ```
@@ -252,8 +278,14 @@ backend/
 ├── main.py              # FastAPI 애플리케이션 엔트리포인트
 ├── requirements.txt     # Python 의존성
 ├── Dockerfile          # Docker 컨테이너 설정
-├── uploads/            # 업로드된 파일 저장소
+├── docker-compose.yml   # Docker Compose 설정
+├── nginx.conf          # Nginx 프록시 서버 설정
+├── deploy_v2.sh        # 배포 스크립트 (docker-compose 기반)
+├── CLAUDE.md           # Claude Code 프로젝트 설정 및 가이드라인
+├── uploads/            # 업로드된 파일 저장소 (현재는 Supabase Storage 사용)
+├── logs/               # 애플리케이션 로그 파일
 ├── services/           # 비즈니스 로직 모듈
+│   ├── __init__.py     # 모듈 초기화
 │   ├── auth.py         # 사용자 인증 및 권한 관리
 │   ├── review.py       # 웹사이트 리뷰 관리
 │   ├── phishing.py     # 피싱 사이트 신고 관리
@@ -265,9 +297,54 @@ backend/
 
 ## 배포 정보
 
+### 배포 환경
 - **프론트엔드**: Vercel (https://webreviewer.vercel.app)
 - **백엔드**: AWS EC2 (SSL 인증 완료)
 - **데이터베이스**: Supabase (PostgreSQL)
+- **프록시 서버**: Nginx (리버스 프록시, 로드 밸런싱)
+
+### 배포 방법
+
+#### Docker Compose 사용 (권장)
+
+현재 프로젝트는 Docker Compose를 사용하여 Nginx와 FastAPI 애플리케이션을 함께 실행합니다.
+
+1. **환경변수 설정**:
+   ```bash
+   # .env 파일 생성 후 필요한 환경변수 설정
+   cp .env.example .env
+   # 환경변수 값 수정
+   ```
+
+2. **배포 스크립트 실행** (권장):
+   ```bash
+   # deploy_v2.sh 스크립트 사용 (자동화된 배포)
+   chmod +x deploy_v2.sh
+   ./deploy_v2.sh
+   ```
+
+3. **수동 배포** (필요시):
+   ```bash
+   # 기존 컨테이너 중지
+   docker-compose down
+   
+   # 이미지 빌드
+   docker-compose build
+   
+   # 컨테이너 시작
+   docker-compose up -d
+   ```
+
+#### 서비스 구성
+- **FastAPI 애플리케이션**: 내부적으로 8000포트에서 실행
+- **Nginx**: 80포트로 외부 요청을 받아 FastAPI로 프록시
+- **헬스체크**: 30초마다 `/health` 엔드포인트 확인
+- **로그**: `./logs` 디렉터리에 애플리케이션 및 Nginx 로그 저장
+
+#### 주의사항
+- `deploy.sh`는 더 이상 사용하지 않습니다. `deploy_v2.sh`를 사용하세요.
+- 배포 전 `.env` 파일의 모든 환경변수가 올바르게 설정되었는지 확인하세요.
+- SSL 인증서는 별도로 관리되며, 필요시 `nginx.conf`에서 HTTPS 설정을 추가할 수 있습니다.
 
 ## 중요 안내 (Supabase 무료 플랜)
 - 무료 플랜에서는 PostgreSQL에 직접 접속(5432 포트)이 불가능합니다.
