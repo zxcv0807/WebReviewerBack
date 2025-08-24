@@ -1,5 +1,5 @@
 # 워크플로우의 이름
-name: Deploy to AWS EC2
+name: Deploy to AWS EC2 (Self-Hosted)
 
 # 어떤 이벤트가 발생했을 때 이 워크플로우를 실행할지 정의
 on:
@@ -11,7 +11,7 @@ on:
 jobs:
   deploy:
     # 이 작업이 실행될 가상 환경의 종류
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     # 작업의 단계(Step)들을 정의
     steps:
@@ -19,14 +19,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. EC2에 접속하여 배포 스크립트를 실행하는 단계
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.AWS_EC2_HOST }}
-          username: ${{ secrets.AWS_EC2_USERNAME }}
-          key: ${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}
-          script: |
-            cd ~/WebReviewerBack
-            chmod +x ./deploy_v2.sh
-            ./deploy_v2.sh
+      # 2. 배포 스크립트를 직접 실행
+      - name: Deploy Application
+        run: ./deploy_v2.sh
