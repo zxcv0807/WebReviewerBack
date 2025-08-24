@@ -19,10 +19,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. 권한 부여
+      # 2. Github Secret을 사용하여 .env 파일 생성
+      - name: Create .env file
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      # 3. 권한 부여
       - name: Add execute permission to deploy script
         run: chmod +x ./deploy_v2.sh
 
-      # 3. 배포 스크립트를 직접 실행
+      # 4. 배포 스크립트를 직접 실행
       - name: Deploy Application
         run: ./deploy_v2.sh
