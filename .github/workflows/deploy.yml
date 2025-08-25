@@ -15,6 +15,10 @@ jobs:
 
     # 작업의 단계(Step)들을 정의
     steps:
+      # root에서 ubuntu로 권한 변경
+      - name: Fix workspace ownership
+        run: sudo chown -R $USER:$USER .
+
       # 1. 코드를 체크아웃하는 단계
       - name: Checkout code
         uses: actions/checkout@v3
