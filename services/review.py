@@ -32,6 +32,7 @@ class ReviewResponse(BaseModel):
     pros: str
     cons: str
     created_at: str
+    view_count: int = 0
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -52,6 +53,7 @@ class ReviewWithCommentsResponse(BaseModel):
     pros: str
     cons: str
     created_at: str
+    view_count: int = 0
     average_rating: Optional[float] = None
     comments: List[CommentResponse]
 
@@ -66,7 +68,8 @@ def create_review(review: ReviewCreate):
         "rating": review.rating,
         "pros": review.pros,
         "cons": review.cons,
-        "created_at": now
+        "created_at": now,
+        "view_count": 0
     }).execute()
     review_id = review_result.data[0]["id"]
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
@@ -92,7 +95,20 @@ def get_reviews():
 
 @router.get("/reviews/{review_id}", response_model=ReviewWithCommentsResponse)
 def get_review(review_id: int):
+    # 리뷰 데이터 조회
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
+    if not review_row:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    # 조회수 증가
+    current_view_count = review_row.get("view_count", 0)
+    supabase.table("review").update({
+        "view_count": current_view_count + 1
+    }).eq("id", review_id).execute()
+    
+    # 업데이트된 view_count를 반영
+    review_row["view_count"] = current_view_count + 1
+    
     comments_data = supabase.table("review_comment").select("*").eq("review_id", review_id).order("created_at").execute().data
     comments = [CommentResponse(**c) for c in comments_data]
     ratings = [c["rating"] for c in comments_data if c.get("rating") is not None]

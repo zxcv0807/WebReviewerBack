@@ -160,3 +160,11 @@ sudo docker ps -a
 sudo docker logs 컨테이너_이름_또는_ID
 sudo docker-compose logs 컨테이너_이름_또는_ID
 ```
+디스크 사용량 확인
+```bash
+df -h
+```
+사용하지 않는 docker 리소스 제거
+```bash
+docker system prune -a -f
+```
