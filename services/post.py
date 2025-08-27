@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, Response
+from fastapi import APIRouter, HTTPException, Depends, Response, Query
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 from .auth import get_current_user
 from .db import supabase
+from .pagination import PaginationParams, PaginatedResponse, create_pagination_info, get_offset
 import os
 import json
 
@@ -110,8 +111,14 @@ def create_post(post: PostCreate, current_user=Depends(get_current_user)):
         user_name=post_row["user_name"]
     )
 
-@router.get("/posts", response_model=List[PostResponse])
-def get_posts(category: Optional[str] = None, tag: Optional[str] = None, type: Optional[str] = None):
+@router.get("/posts", response_model=PaginatedResponse[PostResponse])
+def get_posts(
+    category: Optional[str] = None, 
+    tag: Optional[str] = None, 
+    type: Optional[str] = None,
+    page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
+    limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
+):
     category_map = {
         '자유게시판': 'free',
         'free': 'free',
@@ -121,12 +128,18 @@ def get_posts(category: Optional[str] = None, tag: Optional[str] = None, type: O
     db_category = None
     if category:
         db_category = category_map.get(category, category)
+    
+    # 총 개수 조회
     if tag:
-        post_rows = supabase.table("post").select("*", "tag(name)").eq("tag.name", tag).order("created_at", desc=True).execute().data
+        total_count = len(supabase.table("post").select("id", "tag(name)").eq("tag.name", tag).execute().data)
+        post_rows = supabase.table("post").select("*", "tag(name)").eq("tag.name", tag).order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     elif db_category:
-        post_rows = supabase.table("post").select("*").eq("category", db_category).order("created_at", desc=True).execute().data
+        total_count = len(supabase.table("post").select("id").eq("category", db_category).execute().data)
+        post_rows = supabase.table("post").select("*").eq("category", db_category).order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     else:
-        post_rows = supabase.table("post").select("*").order("created_at", desc=True).execute().data
+        total_count = len(supabase.table("post").select("id").execute().data)
+        post_rows = supabase.table("post").select("*").order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+    
     posts = []
     for post_row in post_rows:
         tags = [row["name"] for row in supabase.table("tag").select("name").eq("post_id", post_row["id"]).execute().data]
@@ -148,7 +161,9 @@ def get_posts(category: Optional[str] = None, tag: Optional[str] = None, type: O
             like_count=post_row.get("like_count", 0),
             dislike_count=post_row.get("dislike_count", 0)
         ))
-    return posts
+    
+    pagination_info = create_pagination_info(page, limit, total_count)
+    return PaginatedResponse(data=posts, pagination=pagination_info)
 
 @router.get("/posts/{post_id}", response_model=PostResponse)
 def get_post(post_id: int):

@@ -95,15 +95,41 @@
 - 외부 API 호출 시 타임아웃 설정
 - 커넥션 풀 관리
 
-## 테스트 및 검증 가이드라인
+## ⛔ Claude Code 테스트 금지 정책
 
-### 코드 변경 후 확인사항
-- FastAPI 서버 정상 시작 확인
-- Docker Compose 서비스 상태 확인 (`docker-compose ps`)
-- Nginx 프록시 동작 확인 (80포트 접근)
-- Swagger UI (/docs)에서 API 문서 확인
-- 주요 엔드포인트 기본 동작 테스트
-- 로그 파일 모니터링 (`./logs/` 디렉터리)
+### 테스트 실행 금지
+- **절대 금지**: Claude Code에서 서버를 실행하거나 API 테스트를 수행하는 것을 금지합니다
+- **이유**: 테스트는 사용자가 직접 수행해야 하며, Claude는 코드 작성에만 집중해야 합니다
+
+## 🔍 필수 에러 검증 절차
+
+### 코드 수정 후 반드시 수행해야 할 에러 검증
+
+#### 1단계: Python 문법 검증
+- **필수**: `python -m py_compile services/*.py` 명령으로 모든 서비스 파일의 문법 오류 확인
+- **필수**: `python -m py_compile main.py` 명령으로 메인 파일 문법 오류 확인
+- **목적**: 기본적인 Python 문법 오류나 들여쓰기 오류 사전 발견
+
+#### 2단계: Import 오류 검증  
+- **필수**: `python -c "from services import auth, post, review, phishing, image, pagination"` 명령으로 import 오류 확인
+- **필수**: `python -c "import main"` 명령으로 메인 모듈 import 확인
+- **목적**: 순환 import, 모듈 경로 오류, 누락된 의존성 사전 발견
+
+#### 3단계: FastAPI 앱 초기화 검증
+- **필수**: `python -c "from main import app; print('FastAPI app initialized successfully')"` 명령으로 앱 초기화 확인
+- **목적**: FastAPI 앱 생성 과정에서 발생할 수 있는 설정 오류나 라우터 등록 오류 확인
+
+### ⚠️ 에러 발견 시 대응
+1. **문법 오류**: 해당 파일의 문법 오류 수정 후 재검증
+2. **Import 오류**: 모듈 경로나 의존성 확인 후 수정
+3. **앱 초기화 오류**: 라우터 등록이나 설정 관련 코드 검토
+
+## 검증 가이드라인
+
+### Claude Code 역할 제한
+- 코드 작성 및 수정만 수행
+- 문법 및 구조적 에러 검증만 수행
+- **금지**: 서버 실행, API 호출, 기능 테스트 등 모든 형태의 테스트 수행
 
 ### 배포 관련 확인사항
 - `deploy_v2.sh` 스크립트를 사용하여 배포

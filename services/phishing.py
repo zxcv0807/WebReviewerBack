@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 from .db import supabase
 from .auth import get_current_user
+from .pagination import PaginationParams, PaginatedResponse, create_pagination_info, get_offset
 import os
 
 router = APIRouter()
@@ -86,13 +87,23 @@ def create_phishing_site(phishing_site: PhishingSiteCreate):
     site_row = supabase.table("phishing_site").select("*").eq("id", phishing_site_id).single().execute().data
     return PhishingSiteResponse(**site_row)
 
-@router.get("/phishing-sites", response_model=List[PhishingSiteResponse])
-def get_phishing_sites(status: Optional[str] = None):
+@router.get("/phishing-sites", response_model=PaginatedResponse[PhishingSiteResponse])
+def get_phishing_sites(
+    status: Optional[str] = None,
+    page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
+    limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
+):
+    # 총 개수 조회
     if status:
-        sites = supabase.table("phishing_site").select("*").eq("status", status).order("created_at", desc=True).execute().data
+        total_count = len(supabase.table("phishing_site").select("id").eq("status", status).execute().data)
+        sites = supabase.table("phishing_site").select("*").eq("status", status).order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     else:
-        sites = supabase.table("phishing_site").select("*").order("created_at", desc=True).execute().data
-    return [PhishingSiteResponse(**site) for site in sites]
+        total_count = len(supabase.table("phishing_site").select("id").execute().data)
+        sites = supabase.table("phishing_site").select("*").order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+    
+    sites_data = [PhishingSiteResponse(**site) for site in sites]
+    pagination_info = create_pagination_info(page, limit, total_count)
+    return PaginatedResponse(data=sites_data, pagination=pagination_info)
 
 @router.get("/phishing-sites/{site_id}", response_model=PhishingSiteResponse)
 def get_phishing_site(site_id: int):

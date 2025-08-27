@@ -22,4 +22,7 @@ sudo docker-compose build
 echo "➡️ 5. 새로운 컨테이너를 시작합니다 (docker-compose up -d)..."
 sudo docker-compose up -d
 
+echo "➡️ 6. 사용하지 않는 Docker 이미지를 정리하여 디스크 공간을 확보합니다..."
+sudo docker image prune -f
+
 echo "✅ 배포가 성공적으로 완료되었습니다!"
