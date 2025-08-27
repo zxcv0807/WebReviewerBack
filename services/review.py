@@ -35,6 +35,7 @@ class ReviewResponse(BaseModel):
     cons: str
     created_at: str
     view_count: int = 0
+    user_id: int
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -56,6 +57,7 @@ class ReviewWithCommentsResponse(BaseModel):
     cons: str
     created_at: str
     view_count: int = 0
+    user_id: int
     average_rating: Optional[float] = None
     comments: List[CommentResponse]
 
@@ -76,7 +78,7 @@ def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
     }).execute()
     review_id = review_result.data[0]["id"]
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
-    # rating 필드 제거해서 반환
+    # rating 필드 제거해서 반환  
     review_row.pop("rating", None)
     return ReviewResponse(**review_row)
 
@@ -183,6 +185,8 @@ def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depe
     if update_fields:
         supabase.table("review").update(update_fields).eq("id", review_id).execute()
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
+    # rating 필드 제거해서 반환
+    review_row.pop("rating", None)
     return ReviewResponse(**review_row)
 
 @router.delete("/reviews/{review_id}")

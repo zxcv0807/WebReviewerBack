@@ -31,6 +31,7 @@ class PhishingSiteResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
+    user_id: Optional[int] = None
 
 class VoteCreate(BaseModel):
     vote_type: str = Field(..., description="추천/비추천 ('like' 또는 'dislike')")
@@ -67,11 +68,12 @@ class PhishingSiteWithCommentsResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
+    user_id: Optional[int] = None
     comments: List[CommentResponse]
 
 # API Endpoints
 @router.post("/phishing-sites", response_model=PhishingSiteResponse)
-def create_phishing_site(phishing_site: PhishingSiteCreate):
+def create_phishing_site(phishing_site: PhishingSiteCreate, current_user=Depends(get_current_user)):
     now = datetime.utcnow().isoformat()
     result = supabase.table("phishing_site").insert({
         "url": phishing_site.url,
@@ -81,7 +83,8 @@ def create_phishing_site(phishing_site: PhishingSiteCreate):
         "created_at": now,
         "view_count": 0,
         "like_count": 0,
-        "dislike_count": 0
+        "dislike_count": 0,
+        "user_id": current_user["id"]
     }).execute()
     phishing_site_id = result.data[0]["id"]
     site_row = supabase.table("phishing_site").select("*").eq("id", phishing_site_id).single().execute().data
