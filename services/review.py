@@ -35,7 +35,7 @@ class ReviewResponse(BaseModel):
     cons: str
     created_at: str
     view_count: int = 0
-    user_id: int
+    user_id: Optional[int] = None
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -62,7 +62,7 @@ class ReviewWithCommentsResponse(BaseModel):
     cons: str
     created_at: str
     view_count: int = 0
-    user_id: int
+    user_id: Optional[int] = None
     average_rating: Optional[float] = None
     comments: List[CommentResponse]
 
