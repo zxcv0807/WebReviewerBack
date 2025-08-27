@@ -197,7 +197,15 @@ def get_post(post_id: int):
     )
 
 @router.put("/posts/{post_id}", response_model=PostResponse)
-def update_post(post_id: int, post_update: PostUpdate):
+def update_post(post_id: int, post_update: PostUpdate, current_user=Depends(get_current_user)):
+    # 게시물 존재 및 작성자 확인
+    post_row = supabase.table("post").select("*").eq("id", post_id).single().execute().data
+    if not post_row:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    if post_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only update your own posts")
+    
     update_fields = {}
     if post_update.title is not None:
         update_fields["title"] = post_update.title
@@ -215,7 +223,15 @@ def update_post(post_id: int, post_update: PostUpdate):
     return get_post(post_id)
 
 @router.delete("/posts/{post_id}")
-def delete_post(post_id: int):
+def delete_post(post_id: int, current_user=Depends(get_current_user)):
+    # 게시물 존재 및 작성자 확인
+    post_row = supabase.table("post").select("*").eq("id", post_id).single().execute().data
+    if not post_row:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    if post_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own posts")
+    
     # 댓글 먼저 삭제
     supabase.table("post_comment").delete().eq("post_id", post_id).execute()
     # 투표 기록 삭제

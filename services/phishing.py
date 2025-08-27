@@ -148,9 +148,14 @@ def update_phishing_site(site_id: int, site_update: PhishingSiteUpdate):
         raise HTTPException(status_code=500, detail=f"Failed to update phishing site: {str(e)}")
 
 @router.delete("/phishing-sites/{site_id}")
-def delete_phishing_site(site_id: int):
-    if not supabase.table("phishing_site").select("id").eq("id", site_id).single().execute().data:
+def delete_phishing_site(site_id: int, current_user=Depends(get_current_user)):
+    site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
+    if not site_row:
         raise HTTPException(status_code=404, detail="Phishing site not found")
+    
+    # 작성자 권한 확인
+    if site_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own phishing site reports")
     try:
         # 댓글 먼저 삭제
         supabase.table("phishing_comment").delete().eq("phishing_site_id", site_id).execute()

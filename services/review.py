@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from .auth import get_current_user
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
@@ -60,7 +61,7 @@ class ReviewWithCommentsResponse(BaseModel):
 
 # API Endpoints
 @router.post("/reviews", response_model=ReviewResponse)
-def create_review(review: ReviewCreate):
+def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
     now = datetime.utcnow().isoformat()
     review_result = supabase.table("review").insert({
         "site_name": review.site_name,
@@ -70,7 +71,8 @@ def create_review(review: ReviewCreate):
         "pros": review.pros,
         "cons": review.cons,
         "created_at": now,
-        "view_count": 0
+        "view_count": 0,
+        "user_id": current_user["id"]
     }).execute()
     review_id = review_result.data[0]["id"]
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
@@ -156,7 +158,15 @@ def create_comment(review_id: int, comment: CommentCreate):
     return CommentResponse(**comment_row)
 
 @router.put("/reviews/{review_id}", response_model=ReviewResponse)
-def update_review(review_id: int, review_update: ReviewUpdate):
+def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depends(get_current_user)):
+    # 리뷰 존재 및 작성자 확인
+    review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
+    if not review_row:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    if review_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only update your own reviews")
+    
     update_fields = {}
     if review_update.site_name is not None:
         update_fields["site_name"] = review_update.site_name
@@ -176,7 +186,15 @@ def update_review(review_id: int, review_update: ReviewUpdate):
     return ReviewResponse(**review_row)
 
 @router.delete("/reviews/{review_id}")
-def delete_review(review_id: int):
+def delete_review(review_id: int, current_user=Depends(get_current_user)):
+    # 리뷰 존재 및 작성자 확인
+    review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
+    if not review_row:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    if review_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own reviews")
+    
     # 댓글 먼저 삭제
     supabase.table("review_comment").delete().eq("review_id", review_id).execute()
     # 리뷰 삭제
