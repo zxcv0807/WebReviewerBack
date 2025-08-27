@@ -41,12 +41,17 @@ class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
     rating: Optional[float] = Field(None, ge=0, le=5, description="0~5점 사이 실수")
 
+class CommentUpdate(BaseModel):
+    content: Optional[str] = None
+    rating: Optional[float] = Field(None, ge=0, le=5)
+
 class CommentResponse(BaseModel):
     id: int
     review_id: int
     content: str
     rating: Optional[float]
     created_at: str
+    user_id: Optional[int] = None
 
 class ReviewWithCommentsResponse(BaseModel):
     id: int
@@ -143,7 +148,7 @@ def get_review(review_id: int):
     return ReviewWithCommentsResponse(**review_row, comments=comments, average_rating=average_rating)
 
 @router.post("/reviews/{review_id}/comments", response_model=CommentResponse)
-def create_comment(review_id: int, comment: CommentCreate):
+def create_comment(review_id: int, comment: CommentCreate, current_user=Depends(get_current_user)):
     # 리뷰 존재 확인
     review = supabase.table("review").select("id").eq("id", review_id).single().execute().data
     if not review:
@@ -153,11 +158,48 @@ def create_comment(review_id: int, comment: CommentCreate):
         "review_id": review_id,
         "content": comment.content,
         "rating": comment.rating,
-        "created_at": now
+        "created_at": now,
+        "user_id": current_user["id"]
     }).execute()
     comment_id = comment_result.data[0]["id"]
     comment_row = supabase.table("review_comment").select("*").eq("id", comment_id).single().execute().data
     return CommentResponse(**comment_row)
+
+@router.put("/comments/{comment_id}", response_model=CommentResponse)
+def update_comment(comment_id: int, comment_update: CommentUpdate, current_user=Depends(get_current_user)):
+    # 댓글 존재 및 작성자 확인
+    comment_row = supabase.table("review_comment").select("*").eq("id", comment_id).single().execute().data
+    if not comment_row:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    
+    if comment_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only update your own comments")
+    
+    update_fields = {}
+    if comment_update.content is not None:
+        update_fields["content"] = comment_update.content
+    if comment_update.rating is not None:
+        update_fields["rating"] = comment_update.rating
+    
+    if update_fields:
+        supabase.table("review_comment").update(update_fields).eq("id", comment_id).execute()
+    
+    comment_row = supabase.table("review_comment").select("*").eq("id", comment_id).single().execute().data
+    return CommentResponse(**comment_row)
+
+@router.delete("/comments/{comment_id}")
+def delete_comment(comment_id: int, current_user=Depends(get_current_user)):
+    # 댓글 존재 및 작성자 확인
+    comment_row = supabase.table("review_comment").select("*").eq("id", comment_id).single().execute().data
+    if not comment_row:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    
+    if comment_row["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own comments")
+    
+    # 댓글 삭제
+    supabase.table("review_comment").delete().eq("id", comment_id).execute()
+    return {"msg": "Comment deleted successfully"}
 
 @router.put("/reviews/{review_id}", response_model=ReviewResponse)
 def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depends(get_current_user)):
