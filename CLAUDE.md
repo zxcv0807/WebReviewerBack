@@ -167,47 +167,77 @@
 - OAuth 에러 상황별 적절한 응답
 
 ### 현재 데이터베이스 구조
-| table_name     | column_name   | data_type                   | is_nullable |
-| -------------- | ------------- | --------------------------- | ----------- |
-| image          | id            | integer                     | NO          |
-| image          | url           | text                        | NO          |
-| image          | filename      | text                        | YES         |
-| image          | uploaded_at   | timestamp without time zone | NO          |
-| image          | storage_path  | character varying           | YES         |
-| phishing_site  | id            | integer                     | NO          |
-| phishing_site  | url           | text                        | NO          |
-| phishing_site  | reason        | text                        | NO          |
-| phishing_site  | description   | text                        | YES         |
-| phishing_site  | status        | text                        | NO          |
-| phishing_site  | created_at    | timestamp without time zone | NO          |
-| post           | id            | integer                     | NO          |
-| post           | title         | text                        | NO          |
-| post           | category      | text                        | NO          |
-| post           | content       | text                        | NO          |
-| post           | created_at    | timestamp without time zone | NO          |
-| post           | updated_at    | timestamp without time zone | NO          |
-| post           | user_name     | text                        | NO          |
-| post           | user_id       | integer                     | YES         |
-| review         | id            | integer                     | NO          |
-| review         | site_name     | text                        | NO          |
-| review         | url           | text                        | NO          |
-| review         | summary       | text                        | NO          |
-| review         | rating        | double precision            | NO          |
-| review         | pros          | text                        | NO          |
-| review         | cons          | text                        | NO          |
-| review         | created_at    | timestamp without time zone | NO          |
-| review_comment | id            | integer                     | NO          |
-| review_comment | review_id     | integer                     | NO          |
-| review_comment | content       | text                        | NO          |
-| review_comment | created_at    | timestamp without time zone | NO          |
-| review_comment | rating        | double precision            | YES         |
-| tag            | id            | integer                     | NO          |
-| tag            | name          | text                        | NO          |
-| tag            | post_id       | integer                     | NO          |
-| user           | id            | integer                     | NO          |
-| user           | username      | text                        | NO          |
-| user           | email         | text                        | NO          |
-| user           | password_hash | text                        | YES         |
-| user           | created_at    | timestamp without time zone | NO          |
-| user           | role          | text                        | NO          |
-| user           | google_id     | text                        | YES         |
+| table_name       | column_name      | data_type                   | is_nullable |
+| ---------------- | ---------------- | --------------------------- | ----------- |
+| image            | id               | integer                     | NO          |
+| image            | url              | text                        | NO          |
+| image            | filename         | text                        | YES         |
+| image            | uploaded_at      | timestamp without time zone | NO          |
+| image            | storage_path     | character varying           | YES         |
+| phishing_comment | id               | integer                     | NO          |
+| phishing_comment | phishing_site_id | integer                     | YES         |
+| phishing_comment | user_id          | integer                     | YES         |
+| phishing_comment | content          | text                        | NO          |
+| phishing_comment | created_at       | timestamp without time zone | YES         |
+| phishing_comment | updated_at       | timestamp without time zone | YES         |
+| phishing_site    | id               | integer                     | NO          |
+| phishing_site    | url              | text                        | NO          |
+| phishing_site    | reason           | text                        | NO          |
+| phishing_site    | description      | text                        | YES         |
+| phishing_site    | status           | text                        | NO          |
+| phishing_site    | created_at       | timestamp without time zone | NO          |
+| phishing_site    | view_count       | integer                     | YES         |
+| phishing_site    | like_count       | integer                     | YES         |
+| phishing_site    | dislike_count    | integer                     | YES         |
+| phishing_site    | user_id          | integer                     | YES         |
+| phishing_vote    | id               | integer                     | NO          |
+| phishing_vote    | phishing_site_id | integer                     | YES         |
+| phishing_vote    | user_id          | integer                     | YES         |
+| phishing_vote    | vote_type        | character varying           | YES         |
+| phishing_vote    | created_at       | timestamp without time zone | YES         |
+| post             | id               | integer                     | NO          |
+| post             | title            | text                        | NO          |
+| post             | category         | text                        | NO          |
+| post             | content          | text                        | NO          |
+| post             | created_at       | timestamp without time zone | NO          |
+| post             | updated_at       | timestamp without time zone | NO          |
+| post             | user_name        | text                        | NO          |
+| post             | user_id          | integer                     | YES         |
+| post             | view_count       | integer                     | YES         |
+| post             | like_count       | integer                     | YES         |
+| post             | dislike_count    | integer                     | YES         |
+| post_comment     | id               | integer                     | NO          |
+| post_comment     | post_id          | integer                     | YES         |
+| post_comment     | user_id          | integer                     | YES         |
+| post_comment     | content          | text                        | NO          |
+| post_comment     | created_at       | timestamp without time zone | YES         |
+| post_comment     | updated_at       | timestamp without time zone | YES         |
+| post_vote        | id               | integer                     | NO          |
+| post_vote        | post_id          | integer                     | YES         |
+| post_vote        | user_id          | integer                     | YES         |
+| post_vote        | vote_type        | character varying           | YES         |
+| post_vote        | created_at       | timestamp without time zone | YES         |
+| review           | id               | integer                     | NO          |
+| review           | site_name        | text                        | NO          |
+| review           | url              | text                        | NO          |
+| review           | summary          | text                        | NO          |
+| review           | rating           | double precision            | NO          |
+| review           | pros             | text                        | NO          |
+| review           | cons             | text                        | NO          |
+| review           | created_at       | timestamp without time zone | NO          |
+| review           | view_count       | integer                     | YES         |
+| review_comment   | id               | integer                     | NO          |
+| review_comment   | review_id        | integer                     | NO          |
+| review_comment   | content          | text                        | NO          |
+| review_comment   | created_at       | timestamp without time zone | NO          |
+| review_comment   | rating           | double precision            | YES         |
+| tag              | id               | integer                     | NO          |
+| tag              | name             | text                        | NO          |
+| tag              | post_id          | integer                     | NO          |
+| user             | id               | integer                     | NO          |
+| user             | username         | text                        | NO          |
+| user             | email            | text                        | NO          |
+| user             | password_hash    | text                        | YES         |
+| user             | created_at       | timestamp without time zone | NO          |
+| user             | role             | text                        | NO          |
+| user             | google_id        | text                        | YES         |

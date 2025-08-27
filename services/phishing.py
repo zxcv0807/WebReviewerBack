@@ -38,10 +38,10 @@ class VoteCreate(BaseModel):
 
 class VoteResponse(BaseModel):
     id: int
-    phishing_site_id: int
-    user_id: int
-    vote_type: str
-    created_at: str
+    phishing_site_id: Optional[int] = None
+    user_id: Optional[int] = None
+    vote_type: Optional[str] = None
+    created_at: Optional[str] = None
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -276,15 +276,19 @@ def remove_vote_phishing_site(site_id: int, current_user=Depends(get_current_use
 @router.get("/phishing-sites/{site_id}/my-vote")
 def get_my_vote_phishing_site(site_id: int, current_user=Depends(get_current_user)):
     # 피싱사이트 존재 확인
-    if not supabase.table("phishing_site").select("id").eq("id", site_id).single().execute().data:
+    try:
+        site_check = supabase.table("phishing_site").select("id").eq("id", site_id).execute().data
+        if not site_check:
+            raise HTTPException(status_code=404, detail="Phishing site not found")
+    except Exception as e:
         raise HTTPException(status_code=404, detail="Phishing site not found")
     
     user_id = current_user["id"]
     
     try:
-        vote = supabase.table("phishing_vote").select("*").eq("phishing_site_id", site_id).eq("user_id", user_id).single().execute().data
-        if vote:
-            return VoteResponse(**vote)
+        vote_result = supabase.table("phishing_vote").select("*").eq("phishing_site_id", site_id).eq("user_id", user_id).execute()
+        if vote_result.data and len(vote_result.data) > 0:
+            return VoteResponse(**vote_result.data[0])
         else:
             return {"msg": "No vote found"}
     except Exception as e:
