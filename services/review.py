@@ -11,7 +11,7 @@ router = APIRouter()
 
 # Pydantic Models
 class VoteCreate(BaseModel):
-    vote_type: str = Field(..., regex="^(like|dislike)$", description="투표 유형: 'like' 또는 'dislike'")
+    vote_type: str = Field(..., pattern="^(like|dislike)$", description="투표 유형: 'like' 또는 'dislike'")
 
 class VoteResponse(BaseModel):
     message: str
