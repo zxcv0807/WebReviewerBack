@@ -10,6 +10,13 @@ import os
 router = APIRouter()
 
 # Pydantic Models
+class VoteCreate(BaseModel):
+    vote_type: str = Field(..., regex="^(like|dislike)$", description="투표 유형: 'like' 또는 'dislike'")
+
+class VoteResponse(BaseModel):
+    message: str
+    like_count: int
+    dislike_count: int
 class ReviewCreate(BaseModel):
     site_name: str = Field(..., description="사이트명")
     url: str = Field(..., description="사이트 링크")
@@ -31,25 +38,25 @@ class ReviewResponse(BaseModel):
     site_name: str
     url: str
     summary: str
+    rating: float
     pros: str
     cons: str
     created_at: str
     view_count: int = 0
+    like_count: int = 0
+    dislike_count: int = 0
     user_id: Optional[int] = None
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
-    rating: Optional[float] = Field(None, ge=0, le=5, description="0~5점 사이 실수")
 
 class CommentUpdate(BaseModel):
     content: Optional[str] = None
-    rating: Optional[float] = Field(None, ge=0, le=5)
 
 class CommentResponse(BaseModel):
     id: int
     review_id: int
     content: str
-    rating: Optional[float]
     created_at: str
     user_id: Optional[int] = None
 
@@ -58,12 +65,14 @@ class ReviewWithCommentsResponse(BaseModel):
     site_name: str
     url: str
     summary: str
+    rating: float
     pros: str
     cons: str
     created_at: str
     view_count: int = 0
+    like_count: int = 0
+    dislike_count: int = 0
     user_id: Optional[int] = None
-    average_rating: Optional[float] = None
     comments: List[CommentResponse]
 
 # API Endpoints
@@ -79,12 +88,12 @@ def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
         "cons": review.cons,
         "created_at": now,
         "view_count": 0,
+        "like_count": 0,
+        "dislike_count": 0,
         "user_id": current_user["id"]
     }).execute()
     review_id = review_result.data[0]["id"]
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
-    # rating 필드 제거해서 반환  
-    review_row.pop("rating", None)
     return ReviewResponse(**review_row)
 
 @router.get("/reviews", response_model=PaginatedResponse[ReviewWithCommentsResponse])
@@ -105,18 +114,12 @@ def get_reviews(
     else:
         comments = []
     
-    reviews_dict = {r["id"]: ReviewWithCommentsResponse(**{k: v for k, v in r.items() if k != "rating"}, comments=[], average_rating=None) for r in reviews}
+    reviews_dict = {r["id"]: ReviewWithCommentsResponse(**r, comments=[]) for r in reviews}
     
-    # 댓글 추가 및 평균 별점 계산
+    # 댓글 추가
     for c in comments:
         if c["review_id"] in reviews_dict:
             reviews_dict[c["review_id"]].comments.append(CommentResponse(**c))
-    
-    for review, rdata in zip(reviews_dict.values(), reviews):
-        ratings = [c.rating for c in review.comments if c.rating is not None]
-        if rdata["rating"] is not None:
-            ratings.append(rdata["rating"])
-        review.average_rating = sum(ratings) / len(ratings) if ratings else None
     
     pagination_info = create_pagination_info(page, limit, total_count)
     return PaginatedResponse(data=list(reviews_dict.values()), pagination=pagination_info)
@@ -139,13 +142,7 @@ def get_review(review_id: int):
     
     comments_data = supabase.table("review_comment").select("*").eq("review_id", review_id).order("created_at").execute().data
     comments = [CommentResponse(**c) for c in comments_data]
-    ratings = [c["rating"] for c in comments_data if c.get("rating") is not None]
-    if review_row["rating"] is not None:
-        ratings.append(review_row["rating"])
-    average_rating = sum(ratings) / len(ratings) if ratings else None
-    # rating 필드 제거해서 반환
-    review_row.pop("rating", None)
-    return ReviewWithCommentsResponse(**review_row, comments=comments, average_rating=average_rating)
+    return ReviewWithCommentsResponse(**review_row, comments=comments)
 
 @router.post("/reviews/{review_id}/comments", response_model=CommentResponse)
 def create_comment(review_id: int, comment: CommentCreate, current_user=Depends(get_current_user)):
@@ -157,7 +154,6 @@ def create_comment(review_id: int, comment: CommentCreate, current_user=Depends(
     comment_result = supabase.table("review_comment").insert({
         "review_id": review_id,
         "content": comment.content,
-        "rating": comment.rating,
         "created_at": now,
         "user_id": current_user["id"]
     }).execute()
@@ -178,8 +174,6 @@ def update_comment(comment_id: int, comment_update: CommentUpdate, current_user=
     update_fields = {}
     if comment_update.content is not None:
         update_fields["content"] = comment_update.content
-    if comment_update.rating is not None:
-        update_fields["rating"] = comment_update.rating
     
     if update_fields:
         supabase.table("review_comment").update(update_fields).eq("id", comment_id).execute()
@@ -200,6 +194,55 @@ def delete_comment(comment_id: int, current_user=Depends(get_current_user)):
     # 댓글 삭제
     supabase.table("review_comment").delete().eq("id", comment_id).execute()
     return {"msg": "Comment deleted successfully"}
+
+@router.post("/reviews/{review_id}/vote", response_model=VoteResponse)
+def vote_review(review_id: int, vote: VoteCreate, current_user=Depends(get_current_user)):
+    # 리뷰 존재 확인
+    review = supabase.table("review").select("id").eq("id", review_id).single().execute().data
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    # 자신의 리뷰에는 추천/비추천 불가
+    review_data = supabase.table("review").select("user_id").eq("id", review_id).single().execute().data
+    if review_data["user_id"] == current_user["id"]:
+        raise HTTPException(status_code=403, detail="You cannot vote on your own review")
+    
+    # 기존 투표 확인
+    existing_vote = supabase.table("review_vote").select("*").eq("review_id", review_id).eq("user_id", current_user["id"]).execute().data
+    
+    if existing_vote:
+        # 기존 투표가 있으면 업데이트
+        if existing_vote[0]["vote_type"] != vote.vote_type:
+            supabase.table("review_vote").update({"vote_type": vote.vote_type}).eq("id", existing_vote[0]["id"]).execute()
+        else:
+            # 같은 투표를 다시 누르면 삭제
+            supabase.table("review_vote").delete().eq("id", existing_vote[0]["id"]).execute()
+    else:
+        # 새 투표 생성
+        now = datetime.utcnow().isoformat()
+        supabase.table("review_vote").insert({
+            "review_id": review_id,
+            "user_id": current_user["id"],
+            "vote_type": vote.vote_type,
+            "created_at": now
+        }).execute()
+    
+    # 추천/비추천 수 계산
+    votes = supabase.table("review_vote").select("vote_type").eq("review_id", review_id).execute().data
+    like_count = sum(1 for v in votes if v["vote_type"] == "like")
+    dislike_count = sum(1 for v in votes if v["vote_type"] == "dislike")
+    
+    # 리뷰 테이블에 추천/비추천 수 업데이트
+    supabase.table("review").update({
+        "like_count": like_count,
+        "dislike_count": dislike_count
+    }).eq("id", review_id).execute()
+    
+    return VoteResponse(
+        message="Vote recorded successfully",
+        like_count=like_count,
+        dislike_count=dislike_count
+    )
 
 @router.put("/reviews/{review_id}", response_model=ReviewResponse)
 def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depends(get_current_user)):
@@ -227,8 +270,6 @@ def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depe
     if update_fields:
         supabase.table("review").update(update_fields).eq("id", review_id).execute()
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
-    # rating 필드 제거해서 반환
-    review_row.pop("rating", None)
     return ReviewResponse(**review_row)
 
 @router.delete("/reviews/{review_id}")
@@ -243,6 +284,8 @@ def delete_review(review_id: int, current_user=Depends(get_current_user)):
     
     # 댓글 먼저 삭제
     supabase.table("review_comment").delete().eq("review_id", review_id).execute()
+    # 추천/비추천 삭제
+    supabase.table("review_vote").delete().eq("review_id", review_id).execute()
     # 리뷰 삭제
     supabase.table("review").delete().eq("id", review_id).execute()
     return {"msg": "Review deleted successfully"} 
