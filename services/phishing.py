@@ -427,6 +427,7 @@ def get_phishing_site_with_comments(site_id: int):
         view_count=site_row["view_count"],
         like_count=site_row.get("like_count", 0),
         dislike_count=site_row.get("dislike_count", 0),
+        user_id=site_row.get("user_id"),
         comments=comments
     )
 
