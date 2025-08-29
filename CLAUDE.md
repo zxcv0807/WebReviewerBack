@@ -175,10 +175,10 @@
 | image            | uploaded_at      | timestamp without time zone | NO          |
 | image            | storage_path     | character varying           | YES         |
 | phishing_comment | id               | integer                     | NO          |
-| phishing_comment | phishing_site_id | integer                     | YES         |
-| phishing_comment | user_id          | integer                     | YES         |
+| phishing_comment | phishing_site_id | integer                     | NO          |
+| phishing_comment | user_id          | integer                     | NO          |
 | phishing_comment | content          | text                        | NO          |
-| phishing_comment | created_at       | timestamp without time zone | YES         |
+| phishing_comment | created_at       | timestamp without time zone | NO          |
 | phishing_comment | updated_at       | timestamp without time zone | YES         |
 | phishing_site    | id               | integer                     | NO          |
 | phishing_site    | url              | text                        | NO          |
@@ -191,8 +191,8 @@
 | phishing_site    | dislike_count    | integer                     | YES         |
 | phishing_site    | user_id          | integer                     | YES         |
 | phishing_vote    | id               | integer                     | NO          |
-| phishing_vote    | phishing_site_id | integer                     | YES         |
-| phishing_vote    | user_id          | integer                     | YES         |
+| phishing_vote    | phishing_site_id | integer                     | NO          |
+| phishing_vote    | user_id          | integer                     | NO          |
 | phishing_vote    | vote_type        | character varying           | YES         |
 | phishing_vote    | created_at       | timestamp without time zone | YES         |
 | post             | id               | integer                     | NO          |
@@ -207,14 +207,14 @@
 | post             | like_count       | integer                     | YES         |
 | post             | dislike_count    | integer                     | YES         |
 | post_comment     | id               | integer                     | NO          |
-| post_comment     | post_id          | integer                     | YES         |
-| post_comment     | user_id          | integer                     | YES         |
+| post_comment     | post_id          | integer                     | NO          |
+| post_comment     | user_id          | integer                     | NO          |
 | post_comment     | content          | text                        | NO          |
-| post_comment     | created_at       | timestamp without time zone | YES         |
+| post_comment     | created_at       | timestamp without time zone | NO          |
 | post_comment     | updated_at       | timestamp without time zone | YES         |
 | post_vote        | id               | integer                     | NO          |
-| post_vote        | post_id          | integer                     | YES         |
-| post_vote        | user_id          | integer                     | YES         |
+| post_vote        | post_id          | integer                     | NO          |
+| post_vote        | user_id          | integer                     | NO          |
 | post_vote        | vote_type        | character varying           | YES         |
 | post_vote        | created_at       | timestamp without time zone | YES         |
 | review           | id               | integer                     | NO          |
@@ -233,11 +233,11 @@
 | review_comment   | review_id        | integer                     | NO          |
 | review_comment   | content          | text                        | NO          |
 | review_comment   | created_at       | timestamp without time zone | NO          |
-| review_comment   | user_id          | integer                     | YES         |
+| review_comment   | user_id          | integer                     | NO          |
 | review_comment   | updated_at       | timestamp without time zone | YES         |
 | review_vote      | id               | integer                     | NO          |
-| review_vote      | review_id        | integer                     | YES         |
-| review_vote      | user_id          | integer                     | YES         |
+| review_vote      | review_id        | integer                     | NO          |
+| review_vote      | user_id          | integer                     | NO          |
 | review_vote      | vote_type        | character varying           | YES         |
 | review_vote      | created_at       | timestamp without time zone | YES         |
 | tag              | id               | integer                     | NO          |

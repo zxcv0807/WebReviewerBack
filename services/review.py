@@ -46,7 +46,7 @@ class ReviewResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
-    user_id: Optional[int] = None
+    user_id: int
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -59,7 +59,7 @@ class CommentResponse(BaseModel):
     review_id: int
     content: str
     created_at: str
-    user_id: Optional[int] = None
+    user_id: int
 
 class ReviewWithCommentsResponse(BaseModel):
     id: int
@@ -73,7 +73,7 @@ class ReviewWithCommentsResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
-    user_id: Optional[int] = None
+    user_id: int
     comments: List[CommentResponse]
 
 # API Endpoints
@@ -215,10 +215,6 @@ def vote_review(review_id: int, vote: VoteCreate, current_user=Depends(get_curre
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     
-    # 자신의 리뷰에는 추천/비추천 불가
-    review_data = supabase.table("review").select("user_id").eq("id", review_id).single().execute().data
-    if review_data["user_id"] == current_user["id"]:
-        raise HTTPException(status_code=403, detail="You cannot vote on your own review")
     
     # 기존 투표 확인
     existing_vote = supabase.table("review_vote").select("*").eq("review_id", review_id).eq("user_id", current_user["id"]).execute().data
