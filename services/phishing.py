@@ -28,6 +28,7 @@ class PhishingSiteResponse(BaseModel):
     description: Optional[str]
     status: str
     created_at: str
+    updated_at: Optional[str] = None
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
@@ -64,6 +65,7 @@ class PhishingSiteWithCommentsResponse(BaseModel):
     description: Optional[str]
     status: str
     created_at: str
+    updated_at: Optional[str] = None
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
@@ -80,6 +82,7 @@ def create_phishing_site(phishing_site: PhishingSiteCreate, current_user=Depends
         "description": phishing_site.description,
         "status": "검토중",
         "created_at": now,
+        "updated_at": now,
         "view_count": 0,
         "like_count": 0,
         "dislike_count": 0,
@@ -140,6 +143,10 @@ def update_phishing_site(site_id: int, site_update: PhishingSiteUpdate):
         update_data["status"] = site_update.status
     if not update_data:
         raise HTTPException(status_code=400, detail="No update fields provided")
+    
+    # updated_at 필드 추가
+    update_data["updated_at"] = datetime.utcnow().isoformat()
+    
     try:
         supabase.table("phishing_site").update(update_data).eq("id", site_id).execute()
         site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
@@ -424,6 +431,7 @@ def get_phishing_site_with_comments(site_id: int):
         description=site_row["description"],
         status=site_row["status"],
         created_at=site_row["created_at"],
+        updated_at=site_row.get("updated_at"),
         view_count=site_row["view_count"],
         like_count=site_row.get("like_count", 0),
         dislike_count=site_row.get("dislike_count", 0),

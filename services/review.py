@@ -43,6 +43,7 @@ class ReviewResponse(BaseModel):
     pros: str
     cons: str
     created_at: str
+    updated_at: Optional[str] = None
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
@@ -70,6 +71,7 @@ class ReviewWithCommentsResponse(BaseModel):
     pros: str
     cons: str
     created_at: str
+    updated_at: Optional[str] = None
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
@@ -88,6 +90,7 @@ def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
         "pros": review.pros,
         "cons": review.cons,
         "created_at": now,
+        "updated_at": now,
         "view_count": 0,
         "like_count": 0,
         "dislike_count": 0,
@@ -332,6 +335,8 @@ def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depe
     if review_update.cons is not None:
         update_fields["cons"] = review_update.cons
     if update_fields:
+        # updated_at 필드 추가
+        update_fields["updated_at"] = datetime.utcnow().isoformat()
         supabase.table("review").update(update_fields).eq("id", review_id).execute()
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
     return ReviewResponse(**review_row)

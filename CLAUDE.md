@@ -190,6 +190,7 @@
 | phishing_site    | like_count       | integer                     | YES         |
 | phishing_site    | dislike_count    | integer                     | YES         |
 | phishing_site    | user_id          | integer                     | YES         |
+| phishing_site    | updated_at       | timestamp without time zone | YES         |
 | phishing_vote    | id               | integer                     | NO          |
 | phishing_vote    | phishing_site_id | integer                     | NO          |
 | phishing_vote    | user_id          | integer                     | NO          |
@@ -229,6 +230,7 @@
 | review           | like_count       | integer                     | YES         |
 | review           | dislike_count    | integer                     | YES         |
 | review           | user_id          | integer                     | YES         |
+| review           | updated_at       | timestamp without time zone | YES         |
 | review_comment   | id               | integer                     | NO          |
 | review_comment   | review_id        | integer                     | NO          |
 | review_comment   | content          | text                        | NO          |
