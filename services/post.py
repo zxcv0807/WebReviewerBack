@@ -40,11 +40,10 @@ class VoteCreate(BaseModel):
     vote_type: str = Field(..., description="추천/비추천 ('like' 또는 'dislike')")
 
 class VoteResponse(BaseModel):
-    id: int
-    post_id: int
-    user_id: int
-    vote_type: str
-    created_at: str
+    message: str
+    like_count: int
+    dislike_count: int
+    user_vote_type: Optional[str] = None
 
 class PostCommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -258,53 +257,81 @@ def vote_post(post_id: int, vote: VoteCreate, current_user=Depends(get_current_u
     
     try:
         # 기존 투표 확인
-        existing_vote = supabase.table("post_vote").select("*").eq("post_id", post_id).eq("user_id", user_id).single().execute().data
+        existing_vote = supabase.table("post_vote").select("*").eq("post_id", post_id).eq("user_id", user_id).execute().data
+        current_user_vote = None
         
         if existing_vote:
-            old_vote_type = existing_vote["vote_type"]
+            old_vote_type = existing_vote[0]["vote_type"]
             if old_vote_type == vote.vote_type:
-                raise HTTPException(status_code=400, detail="You have already voted with the same type")
+                # 같은 투표를 다시 누르면 삭제 (토글)
+                supabase.table("post_vote").delete().eq("post_id", post_id).eq("user_id", user_id).execute()
+                current_user_vote = None
+                
+                # 카운트 감소
+                if old_vote_type == "like":
+                    supabase.table("post").update({
+                        "like_count": max(0, post_row.get("like_count", 0) - 1)
+                    }).eq("id", post_id).execute()
+                else:
+                    supabase.table("post").update({
+                        "dislike_count": max(0, post_row.get("dislike_count", 0) - 1)
+                    }).eq("id", post_id).execute()
+            else:
+                # 다른 타입으로 변경
+                supabase.table("post_vote").update({"vote_type": vote.vote_type}).eq("id", existing_vote[0]["id"]).execute()
+                current_user_vote = vote.vote_type
+                
+                # 이전 투표 카운트 감소
+                if old_vote_type == "like":
+                    supabase.table("post").update({
+                        "like_count": max(0, post_row.get("like_count", 0) - 1)
+                    }).eq("id", post_id).execute()
+                else:
+                    supabase.table("post").update({
+                        "dislike_count": max(0, post_row.get("dislike_count", 0) - 1)
+                    }).eq("id", post_id).execute()
+                
+                # 새 투표 카운트 증가
+                post_row = supabase.table("post").select("*").eq("id", post_id).single().execute().data
+                if vote.vote_type == "like":
+                    supabase.table("post").update({
+                        "like_count": post_row.get("like_count", 0) + 1
+                    }).eq("id", post_id).execute()
+                else:
+                    supabase.table("post").update({
+                        "dislike_count": post_row.get("dislike_count", 0) + 1
+                    }).eq("id", post_id).execute()
+        else:
+            # 새 투표 생성
+            supabase.table("post_vote").insert({
+                "post_id": post_id,
+                "user_id": user_id,
+                "vote_type": vote.vote_type,
+                "created_at": now
+            }).execute()
+            current_user_vote = vote.vote_type
             
-            # 기존 투표 삭제 및 카운트 감소
-            supabase.table("post_vote").delete().eq("post_id", post_id).eq("user_id", user_id).execute()
-            
-            if old_vote_type == "like":
+            # 카운트 증가
+            if vote.vote_type == "like":
                 supabase.table("post").update({
-                    "like_count": max(0, post_row.get("like_count", 0) - 1)
+                    "like_count": post_row.get("like_count", 0) + 1
                 }).eq("id", post_id).execute()
             else:
                 supabase.table("post").update({
-                    "dislike_count": max(0, post_row.get("dislike_count", 0) - 1)
+                    "dislike_count": post_row.get("dislike_count", 0) + 1
                 }).eq("id", post_id).execute()
-            
-            # 게시글 데이터 다시 조회
-            post_row = supabase.table("post").select("*").eq("id", post_id).single().execute().data
         
-        # 새 투표 추가
-        vote_result = supabase.table("post_vote").insert({
-            "post_id": post_id,
-            "user_id": user_id,
-            "vote_type": vote.vote_type,
-            "created_at": now
-        }).execute()
+        # 업데이트된 카운트 조회
+        updated_post = supabase.table("post").select("like_count, dislike_count").eq("id", post_id).single().execute().data
         
-        # 카운트 증가
-        if vote.vote_type == "like":
-            supabase.table("post").update({
-                "like_count": post_row.get("like_count", 0) + 1
-            }).eq("id", post_id).execute()
-        else:
-            supabase.table("post").update({
-                "dislike_count": post_row.get("dislike_count", 0) + 1
-            }).eq("id", post_id).execute()
-        
-        vote_id = vote_result.data[0]["id"]
-        vote_row = supabase.table("post_vote").select("*").eq("id", vote_id).single().execute().data
-        return VoteResponse(**vote_row)
+        return VoteResponse(
+            message="Vote recorded successfully",
+            like_count=updated_post.get("like_count", 0),
+            dislike_count=updated_post.get("dislike_count", 0),
+            user_vote_type=current_user_vote
+        )
         
     except Exception as e:
-        if "already voted" in str(e):
-            raise e
         raise HTTPException(status_code=500, detail=f"Failed to vote: {str(e)}")
 
 @router.delete("/posts/{post_id}/vote")
@@ -354,11 +381,11 @@ def get_my_vote_post(post_id: int, current_user=Depends(get_current_user)):
     user_id = current_user["id"]
     
     try:
-        vote = supabase.table("post_vote").select("*").eq("post_id", post_id).eq("user_id", user_id).single().execute().data
+        vote = supabase.table("post_vote").select("vote_type").eq("post_id", post_id).eq("user_id", user_id).execute().data
         if vote:
-            return VoteResponse(**vote)
+            return {"vote_type": vote[0]["vote_type"]}
         else:
-            return {"msg": "No vote found"}
+            return {"vote_type": None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get vote: {str(e)}")
 

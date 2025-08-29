@@ -17,6 +17,7 @@ class VoteResponse(BaseModel):
     message: str
     like_count: int
     dislike_count: int
+    user_vote_type: Optional[str] = None
 class ReviewCreate(BaseModel):
     site_name: str = Field(..., description="사이트명")
     url: str = Field(..., description="사이트 링크")
@@ -142,6 +143,18 @@ def get_review(review_id: int):
     
     comments_data = supabase.table("review_comment").select("*").eq("review_id", review_id).order("created_at").execute().data
     comments = [CommentResponse(**c) for c in comments_data]
+    # 현재 사용자의 투표 상태 확인 (로그인된 경우만)
+    user_vote_type = None
+    try:
+        if hasattr(get_current_user, '__call__'):
+            current_user = get_current_user()
+            if current_user:
+                user_vote = supabase.table("review_vote").select("vote_type").eq("review_id", review_id).eq("user_id", current_user["id"]).execute().data
+                if user_vote:
+                    user_vote_type = user_vote[0]["vote_type"]
+    except:
+        pass
+    
     return ReviewWithCommentsResponse(**review_row, comments=comments)
 
 @router.post("/reviews/{review_id}/comments", response_model=CommentResponse)
@@ -209,14 +222,18 @@ def vote_review(review_id: int, vote: VoteCreate, current_user=Depends(get_curre
     
     # 기존 투표 확인
     existing_vote = supabase.table("review_vote").select("*").eq("review_id", review_id).eq("user_id", current_user["id"]).execute().data
+    current_user_vote = None
     
     if existing_vote:
-        # 기존 투표가 있으면 업데이트
+        # 기존 투표가 있으면 처리
         if existing_vote[0]["vote_type"] != vote.vote_type:
+            # 다른 타입으로 변경
             supabase.table("review_vote").update({"vote_type": vote.vote_type}).eq("id", existing_vote[0]["id"]).execute()
+            current_user_vote = vote.vote_type
         else:
-            # 같은 투표를 다시 누르면 삭제
+            # 같은 투표를 다시 누르면 삭제 (토글)
             supabase.table("review_vote").delete().eq("id", existing_vote[0]["id"]).execute()
+            current_user_vote = None
     else:
         # 새 투표 생성
         now = datetime.utcnow().isoformat()
@@ -226,6 +243,7 @@ def vote_review(review_id: int, vote: VoteCreate, current_user=Depends(get_curre
             "vote_type": vote.vote_type,
             "created_at": now
         }).execute()
+        current_user_vote = vote.vote_type
     
     # 추천/비추천 수 계산
     votes = supabase.table("review_vote").select("vote_type").eq("review_id", review_id).execute().data
@@ -241,8 +259,24 @@ def vote_review(review_id: int, vote: VoteCreate, current_user=Depends(get_curre
     return VoteResponse(
         message="Vote recorded successfully",
         like_count=like_count,
-        dislike_count=dislike_count
+        dislike_count=dislike_count,
+        user_vote_type=current_user_vote
     )
+
+@router.get("/reviews/{review_id}/my-vote")
+def get_my_review_vote(review_id: int, current_user=Depends(get_current_user)):
+    # 리뷰 존재 확인
+    review = supabase.table("review").select("id").eq("id", review_id).single().execute().data
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    # 사용자의 투표 조회
+    user_vote = supabase.table("review_vote").select("vote_type").eq("review_id", review_id).eq("user_id", current_user["id"]).execute().data
+    
+    if user_vote:
+        return {"vote_type": user_vote[0]["vote_type"]}
+    else:
+        return {"vote_type": None}
 
 @router.put("/reviews/{review_id}", response_model=ReviewResponse)
 def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depends(get_current_user)):

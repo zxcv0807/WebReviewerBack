@@ -37,11 +37,10 @@ class VoteCreate(BaseModel):
     vote_type: str = Field(..., description="추천/비추천 ('like' 또는 'dislike')")
 
 class VoteResponse(BaseModel):
-    id: int
-    phishing_site_id: Optional[int] = None
-    user_id: Optional[int] = None
-    vote_type: Optional[str] = None
-    created_at: Optional[str] = None
+    message: str
+    like_count: int
+    dislike_count: int
+    user_vote_type: Optional[str] = None
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -186,53 +185,81 @@ def vote_phishing_site(site_id: int, vote: VoteCreate, current_user=Depends(get_
     
     try:
         # 기존 투표 확인
-        existing_vote = supabase.table("phishing_vote").select("*").eq("phishing_site_id", site_id).eq("user_id", user_id).single().execute().data
+        existing_vote = supabase.table("phishing_vote").select("*").eq("phishing_site_id", site_id).eq("user_id", user_id).execute().data
+        current_user_vote = None
         
         if existing_vote:
-            old_vote_type = existing_vote["vote_type"]
+            old_vote_type = existing_vote[0]["vote_type"]
             if old_vote_type == vote.vote_type:
-                raise HTTPException(status_code=400, detail="You have already voted with the same type")
+                # 같은 투표를 다시 누르면 삭제 (토글)
+                supabase.table("phishing_vote").delete().eq("phishing_site_id", site_id).eq("user_id", user_id).execute()
+                current_user_vote = None
+                
+                # 카운트 감소
+                if old_vote_type == "like":
+                    supabase.table("phishing_site").update({
+                        "like_count": max(0, site_row.get("like_count", 0) - 1)
+                    }).eq("id", site_id).execute()
+                else:
+                    supabase.table("phishing_site").update({
+                        "dislike_count": max(0, site_row.get("dislike_count", 0) - 1)
+                    }).eq("id", site_id).execute()
+            else:
+                # 다른 타입으로 변경
+                supabase.table("phishing_vote").update({"vote_type": vote.vote_type}).eq("id", existing_vote[0]["id"]).execute()
+                current_user_vote = vote.vote_type
+                
+                # 이전 투표 카운트 감소
+                if old_vote_type == "like":
+                    supabase.table("phishing_site").update({
+                        "like_count": max(0, site_row.get("like_count", 0) - 1)
+                    }).eq("id", site_id).execute()
+                else:
+                    supabase.table("phishing_site").update({
+                        "dislike_count": max(0, site_row.get("dislike_count", 0) - 1)
+                    }).eq("id", site_id).execute()
+                
+                # 새 투표 카운트 증가
+                site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
+                if vote.vote_type == "like":
+                    supabase.table("phishing_site").update({
+                        "like_count": site_row.get("like_count", 0) + 1
+                    }).eq("id", site_id).execute()
+                else:
+                    supabase.table("phishing_site").update({
+                        "dislike_count": site_row.get("dislike_count", 0) + 1
+                    }).eq("id", site_id).execute()
+        else:
+            # 새 투표 생성
+            supabase.table("phishing_vote").insert({
+                "phishing_site_id": site_id,
+                "user_id": user_id,
+                "vote_type": vote.vote_type,
+                "created_at": now
+            }).execute()
+            current_user_vote = vote.vote_type
             
-            # 기존 투표 삭제 및 카운트 감소
-            supabase.table("phishing_vote").delete().eq("phishing_site_id", site_id).eq("user_id", user_id).execute()
-            
-            if old_vote_type == "like":
+            # 카운트 증가
+            if vote.vote_type == "like":
                 supabase.table("phishing_site").update({
-                    "like_count": max(0, site_row.get("like_count", 0) - 1)
+                    "like_count": site_row.get("like_count", 0) + 1
                 }).eq("id", site_id).execute()
             else:
                 supabase.table("phishing_site").update({
-                    "dislike_count": max(0, site_row.get("dislike_count", 0) - 1)
+                    "dislike_count": site_row.get("dislike_count", 0) + 1
                 }).eq("id", site_id).execute()
-            
-            # 사이트 데이터 다시 조회
-            site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
         
-        # 새 투표 추가
-        vote_result = supabase.table("phishing_vote").insert({
-            "phishing_site_id": site_id,
-            "user_id": user_id,
-            "vote_type": vote.vote_type,
-            "created_at": now
-        }).execute()
+        # 업데이트된 카운트 조회
+        updated_site = supabase.table("phishing_site").select("like_count, dislike_count").eq("id", site_id).single().execute().data
         
-        # 카운트 증가
-        if vote.vote_type == "like":
-            supabase.table("phishing_site").update({
-                "like_count": site_row.get("like_count", 0) + 1
-            }).eq("id", site_id).execute()
-        else:
-            supabase.table("phishing_site").update({
-                "dislike_count": site_row.get("dislike_count", 0) + 1
-            }).eq("id", site_id).execute()
-        
-        vote_id = vote_result.data[0]["id"]
-        vote_row = supabase.table("phishing_vote").select("*").eq("id", vote_id).single().execute().data
-        return VoteResponse(**vote_row)
+        return VoteResponse(
+            message="Vote recorded successfully",
+            like_count=updated_site.get("like_count", 0),
+            dislike_count=updated_site.get("dislike_count", 0),
+            user_vote_type=current_user_vote
+        )
         
     except Exception as e:
-        if "already voted" in str(e):
-            raise e
         raise HTTPException(status_code=500, detail=f"Failed to vote: {str(e)}")
 
 @router.delete("/phishing-sites/{site_id}/vote")
@@ -286,11 +313,11 @@ def get_my_vote_phishing_site(site_id: int, current_user=Depends(get_current_use
     user_id = current_user["id"]
     
     try:
-        vote_result = supabase.table("phishing_vote").select("*").eq("phishing_site_id", site_id).eq("user_id", user_id).execute()
+        vote_result = supabase.table("phishing_vote").select("vote_type").eq("phishing_site_id", site_id).eq("user_id", user_id).execute()
         if vote_result.data and len(vote_result.data) > 0:
-            return VoteResponse(**vote_result.data[0])
+            return {"vote_type": vote_result.data[0]["vote_type"]}
         else:
-            return {"msg": "No vote found"}
+            return {"vote_type": None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get vote: {str(e)}")
 

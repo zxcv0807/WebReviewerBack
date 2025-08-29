@@ -226,11 +226,20 @@
 | review           | cons             | text                        | NO          |
 | review           | created_at       | timestamp without time zone | NO          |
 | review           | view_count       | integer                     | YES         |
+| review           | like_count       | integer                     | YES         |
+| review           | dislike_count    | integer                     | YES         |
+| review           | user_id          | integer                     | YES         |
 | review_comment   | id               | integer                     | NO          |
 | review_comment   | review_id        | integer                     | NO          |
 | review_comment   | content          | text                        | NO          |
 | review_comment   | created_at       | timestamp without time zone | NO          |
-| review_comment   | rating           | double precision            | YES         |
+| review_comment   | user_id          | integer                     | YES         |
+| review_comment   | updated_at       | timestamp without time zone | YES         |
+| review_vote      | id               | integer                     | NO          |
+| review_vote      | review_id        | integer                     | YES         |
+| review_vote      | user_id          | integer                     | YES         |
+| review_vote      | vote_type        | character varying           | YES         |
+| review_vote      | created_at       | timestamp without time zone | YES         |
 | tag              | id               | integer                     | NO          |
 | tag              | name             | text                        | NO          |
 | tag              | post_id          | integer                     | NO          |
