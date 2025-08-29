@@ -278,6 +278,40 @@ def get_my_review_vote(review_id: int, current_user=Depends(get_current_user)):
     else:
         return {"vote_type": None}
 
+@router.delete("/reviews/{review_id}/vote")
+def remove_review_vote(review_id: int, current_user=Depends(get_current_user)):
+    # 리뷰 존재 확인
+    review = supabase.table("review").select("id").eq("id", review_id).single().execute().data
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    user_id = current_user["id"]
+    
+    # 기존 투표 확인
+    existing_vote = supabase.table("review_vote").select("*").eq("review_id", review_id).eq("user_id", user_id).execute().data
+    
+    if not existing_vote:
+        raise HTTPException(status_code=400, detail="No vote found to remove")
+    
+    # 투표 삭제
+    supabase.table("review_vote").delete().eq("review_id", review_id).eq("user_id", user_id).execute()
+    
+    # 추천/비추천 수 재계산 및 업데이트
+    votes = supabase.table("review_vote").select("vote_type").eq("review_id", review_id).execute().data
+    like_count = sum(1 for v in votes if v["vote_type"] == "like")
+    dislike_count = sum(1 for v in votes if v["vote_type"] == "dislike")
+    
+    supabase.table("review").update({
+        "like_count": like_count,
+        "dislike_count": dislike_count
+    }).eq("id", review_id).execute()
+    
+    return {
+        "message": "Vote removed successfully",
+        "like_count": like_count,
+        "dislike_count": dislike_count
+    }
+
 @router.put("/reviews/{review_id}", response_model=ReviewResponse)
 def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depends(get_current_user)):
     # 리뷰 존재 및 작성자 확인
