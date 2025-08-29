@@ -46,7 +46,7 @@ class ReviewResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
-    user_id: Optional[int] = None
+    user_id: Optional[int]
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -59,7 +59,7 @@ class CommentResponse(BaseModel):
     review_id: int
     content: str
     created_at: str
-    user_id: Optional[int] = None
+    user_id: Optional[int]
 
 class ReviewWithCommentsResponse(BaseModel):
     id: int
@@ -73,7 +73,7 @@ class ReviewWithCommentsResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
-    user_id: Optional[int] = None
+    user_id: Optional[int]
     comments: List[CommentResponse]
 
 # API Endpoints

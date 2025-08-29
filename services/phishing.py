@@ -31,7 +31,7 @@ class PhishingSiteResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
-    user_id: Optional[int] = None
+    user_id: Optional[int]
 
 class VoteCreate(BaseModel):
     vote_type: str = Field(..., description="추천/비추천 ('like' 또는 'dislike')")
@@ -67,7 +67,7 @@ class PhishingSiteWithCommentsResponse(BaseModel):
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
-    user_id: Optional[int] = None
+    user_id: Optional[int]
     comments: List[CommentResponse]
 
 # API Endpoints
