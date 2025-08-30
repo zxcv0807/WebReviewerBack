@@ -406,37 +406,57 @@ def signup_request(user: SignupRequest):
     - 실제 활성화는 인증 완료 후에 이루어짐
     """
     try:
-        # 1. 이메일 중복 체크 먼저 수행
+        # 1. 기존 계정 전체 조회 (이메일 + 사용자명)
         email_result = supabase.table("user").select("*").eq("email", user.email).execute()
+        username_result = supabase.table("user").select("*").eq("username", user.username).execute()
+        
+        # 2. 미인증 계정 삭제 처리
+        accounts_to_delete = []
+        
+        # 이메일 중복 체크
         if email_result.data:
-            # 기존에 미인증 계정이 있다면 삭제하고 새로 생성
             existing_user = email_result.data[0]
             if not existing_user.get("email_verified"):
-                supabase.table("user").delete().eq("id", existing_user["id"]).execute()
-                supabase.table("email_verification_token").delete().eq("user_id", existing_user["id"]).execute()
-                logger.info(f"Deleted existing unverified account for email: {user.email}")
+                accounts_to_delete.append(existing_user["id"])
+                logger.info(f"Will delete unverified account for email: {user.email}")
             else:
                 raise HTTPException(status_code=400, detail="Email already registered")
         
-        # 2. 사용자명 중복 체크 (미인증 계정 삭제 후)
-        username_result = supabase.table("user").select("*").eq("username", user.username).execute()
+        # 사용자명 중복 체크
         if username_result.data:
-            # 인증된 계정 중에 같은 사용자명이 있는지 확인
-            verified_username = [u for u in username_result.data if u.get("email_verified")]
-            if verified_username:
-                raise HTTPException(status_code=400, detail="Username already registered")
-            # 미인증 계정은 삭제
-            for unverified_user in username_result.data:
-                if not unverified_user.get("email_verified"):
-                    supabase.table("user").delete().eq("id", unverified_user["id"]).execute()
-                    supabase.table("email_verification_token").delete().eq("user_id", unverified_user["id"]).execute()
-                    logger.info(f"Deleted existing unverified account for username: {user.username}")
+            for existing_user in username_result.data:
+                if existing_user.get("email_verified"):
+                    raise HTTPException(status_code=400, detail="Username already registered")
+                else:
+                    if existing_user["id"] not in accounts_to_delete:  # 중복 삭제 방지
+                        accounts_to_delete.append(existing_user["id"])
+                        logger.info(f"Will delete unverified account for username: {user.username}")
         
-        # 3. 패스워드 해싱
+        # 3. 미인증 계정들 일괄 삭제
+        for account_id in accounts_to_delete:
+            try:
+                supabase.table("email_verification_token").delete().eq("user_id", account_id).execute()
+                supabase.table("user").delete().eq("id", account_id).execute()
+                logger.info(f"Deleted unverified account with ID: {account_id}")
+            except Exception as e:
+                logger.warning(f"Failed to delete account {account_id}: {str(e)}")
+        
+        # 4. 삭제 후 최종 중복 체크 (안전장치)
+        if accounts_to_delete:
+            # 삭제 후 재확인
+            final_email_check = supabase.table("user").select("id").eq("email", user.email).execute()
+            final_username_check = supabase.table("user").select("id").eq("username", user.username).execute()
+            
+            if final_email_check.data:
+                raise HTTPException(status_code=400, detail="Email already registered")
+            if final_username_check.data:
+                raise HTTPException(status_code=400, detail="Username already registered")
+        
+        # 5. 패스워드 해싱
         hashed_password = get_password_hash(user.password)
         created_at = datetime.utcnow().isoformat()
         
-        # 4. 임시 계정 생성 (미인증 상태)
+        # 6. 임시 계정 생성 (미인증 상태)
         insert_result = supabase.table("user").insert({
             "username": user.username,
             "email": user.email,
@@ -449,7 +469,7 @@ def signup_request(user: SignupRequest):
         if not insert_result.data:
             raise HTTPException(status_code=500, detail="Failed to create user")
         
-        # 5. 인증 코드 생성 및 발송
+        # 7. 인증 코드 생성 및 발송
         try:
             user_id = insert_result.data[0]["id"]
             code = create_email_verification_code(user_id)
