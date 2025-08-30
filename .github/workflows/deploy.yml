@@ -1,6 +1,4 @@
-# .github/workflows/deploy.yml
-
-name: Build and Deploy on Self-Hosted Runner
+name: Deploy to AWS EC2 (Self-Hosted)
 
 on:
   push:
@@ -8,35 +6,30 @@ on:
       - main
 
 jobs:
-  build-and-deploy:
-    # 모든 작업을 self-hosted runner에서 실행
+  deploy:
     runs-on: self-hosted
-
     steps:
-      # 1. 코드를 체크아웃합니다.
+      # 1. 이전 작업으로 인해 root가 소유한 파일/폴더가 있을 수 있으므로,
+      #    checkout을 실행하기 전에 작업 공간 전체의 소유권을 현재 Runner 사용자에게 부여합니다.
+      - name: Fix workspace ownership
+        run: sudo chown -R $USER:$USER $GITHUB_WORKSPACE
+
+      # 2. 코드를 체크아웃합니다.
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. .env 파일을 생성합니다.
+      # 3. .env 파일을 생성합니다.
       - name: Create .env file
-        run: echo "${{ secrets.ENV_FILE }}" > .env
-
-      # 3. Docker Hub에 로그인합니다.
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKKERHUB_USERNAME }} # 오타 수정: DOCKERHUB_USERNAME
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # 4. 이미지를 빌드하고 Docker Hub에 푸시합니다.
-      - name: Build and push Docker images
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         run: |
-          sudo docker-compose -f docker-compose.build.yml build
-          sudo docker-compose -f docker-compose.build.yml push
+          echo "Creating .env file from secret..."
+          echo "$ENV_FILE_CONTENT" > .env
 
-      # 5. 최신 이미지를 받아와서 서비스를 재시작합니다.
-      - name: Pull latest images and restart services
-        run: |
-          sudo docker-compose pull
-          sudo docker-compose up -d --remove-orphans
-          sudo docker image prune -f
+      # 4. 배포 스크립트에 실행 권한을 부여합니다.
+      - name: Add execute permission to deploy script
+        run: chmod +x ./deploy_v2.sh
+
+      # 5. 배포 스크립트를 실행합니다.
+      - name: Deploy Application
+        run: ./deploy_v2.sh
