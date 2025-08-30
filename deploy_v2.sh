@@ -13,16 +13,10 @@ git reset --hard HEAD
 echo "➡️ 2. 최신 코드를 가져옵니다 (git pull)..."
 git pull
 
-echo "➡️ 3. 기존 컨테이너를 중지합니다 (docker-compose down)..."
-sudo docker-compose down
+echo "➡️ 3. Docker 컨테이너를 다시 빌드하고 시작합니다..."
+sudo docker-compose up --build -d
 
-echo "➡️ 4. 새로운 이미지를 빌드합니다 (docker-compose build)..."
-sudo docker-compose build
-
-echo "➡️ 5. 새로운 컨테이너를 시작합니다 (docker-compose up -d)..."
-sudo docker-compose up -d
-
-echo "➡️ 6. 사용하지 않는 Docker 이미지를 정리하여 디스크 공간을 확보합니다..."
+echo "➡️ 4. 사용하지 않는 Docker 이미지를 정리하여 디스크 공간을 확보합니다..."
 sudo docker image prune -f
 
 echo "✅ 배포가 성공적으로 완료되었습니다!"

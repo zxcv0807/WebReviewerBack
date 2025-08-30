@@ -1,3 +1,5 @@
+# .github/workflows/deploy.yml
+
 name: Deploy to AWS EC2 (Self-Hosted)
 
 on:
@@ -7,29 +9,19 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted
-    steps:
-      # 1. 이전 작업으로 인해 root가 소유한 파일/폴더가 있을 수 있으므로,
-      #    checkout을 실행하기 전에 작업 공간 전체의 소유권을 현재 Runner 사용자에게 부여합니다.
-      - name: Fix workspace ownership
-        run: sudo chown -R $USER:$USER $GITHUB_WORKSPACE
+    runs-on: self-hosted # 모든 작업을 self-hosted runner에서 실행
 
-      # 2. 코드를 체크아웃합니다.
+    steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 3. .env 파일을 생성합니다.
       - name: Create .env file
         env:
           ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
-        run: |
-          echo "Creating .env file from secret..."
-          echo "$ENV_FILE_CONTENT" > .env
+        run: echo "$ENV_FILE_CONTENT" > .env
 
-      # 4. 배포 스크립트에 실행 권한을 부여합니다.
       - name: Add execute permission to deploy script
         run: chmod +x ./deploy_v2.sh
-
-      # 5. 배포 스크립트를 실행합니다.
+      
       - name: Deploy Application
         run: ./deploy_v2.sh
