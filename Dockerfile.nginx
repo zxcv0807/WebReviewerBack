@@ -1,0 +1,4 @@
+# Dockerfile.nginx (새 파일)
+
+# 공식 Nginx 이미지를 기반으로 사용
+FROM nginx:alpine

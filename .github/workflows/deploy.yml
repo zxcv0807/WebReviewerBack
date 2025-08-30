@@ -1,45 +1,42 @@
-# 워크플로우의 이름
-name: Deploy to AWS EC2 (Self-Hosted)
+# .github/workflows/deploy.yml
 
-# 어떤 이벤트가 발생했을 때 이 워크플로우를 실행할지 정의
+name: Build and Deploy on Self-Hosted Runner
+
 on:
   push:
     branches:
-      - main  # main 브랜치에 push가 발생했을 때만 실행
+      - main
 
-# 실행될 작업(Job)들을 정의
 jobs:
-  deploy:
-    # 이 작업이 실행될 가상 환경의 종류
+  build-and-deploy:
+    # 모든 작업을 self-hosted runner에서 실행
     runs-on: self-hosted
 
-    # 작업의 단계(Step)들을 정의
     steps:
-      # root에서 ubuntu로 권한 변경
-      - name: Fix workspace ownership
-        run: sudo chown -R $USER:$USER .
-
-      # 1. 코드를 체크아웃하는 단계
+      # 1. 코드를 체크아웃합니다.
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. GitHub Secret을 사용하여 .env 파일을 생성합니다. (✨ 수정된 부분)
+      # 2. .env 파일을 생성합니다.
       - name: Create .env file
-        env:
-          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      # 3. Docker Hub에 로그인합니다.
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKKERHUB_USERNAME }} # 오타 수정: DOCKERHUB_USERNAME
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 4. 이미지를 빌드하고 Docker Hub에 푸시합니다.
+      - name: Build and push Docker images
         run: |
-          echo "Creating .env file from secret..."
-          echo "$ENV_FILE_CONTENT" > .env
-          echo ".env file created successfully."
-          echo "Verifying first line of .env file:"
-          head -n 1 .env
+          sudo docker-compose -f docker-compose.build.yml build
+          sudo docker-compose -f docker-compose.build.yml push
 
-      # 2. 권한 부여
-      - name: Add execute permission to deploy script
-        run: chmod +x ./deploy_v2.sh
-
-      # 3. Github Secret을 ENV_CONTENT 환경변수로 전달하며 배포 스크립트 실행
-      - name: Deploy Application
-        env:
-          ENV_CONTENT: ${{ secrets.ENV_FILE }}
-        run: ./deploy_v2.sh
+      # 5. 최신 이미지를 받아와서 서비스를 재시작합니다.
+      - name: Pull latest images and restart services
+        run: |
+          sudo docker-compose pull
+          sudo docker-compose up -d --remove-orphans
+          sudo docker image prune -f

@@ -1,0 +1,13 @@
+# docker-compose.build.yml (새 파일)
+
+services:
+  web:
+    build: .
+    image: [DOCKERHUB_ID]/webreviewerback-web:latest
+
+  nginx:
+    # nginx용 Dockerfile을 사용하도록 build context를 지정합니다.
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    image: [DOCKERHUB_ID]/webreviewerback-nginx:latest
