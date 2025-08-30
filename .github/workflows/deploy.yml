@@ -15,11 +15,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Create .env file
-        env:
-          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
-        run: echo "$ENV_FILE_CONTENT" > .env
-
       - name: Add execute permission to deploy script
         run: chmod +x ./deploy_v2.sh
       
