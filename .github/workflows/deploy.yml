@@ -23,6 +23,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # ✨ 새로 추가된 디버깅 단계
+      - name: Debug ENV_FILE content
+        run: |
+          echo "Verifying the first line of the received secret:"
+          echo "${{ secrets.ENV_FILE }}" | head -n 1
+
       # 2. 권한 부여
       - name: Add execute permission to deploy script
         run: chmod +x ./deploy_v2.sh
