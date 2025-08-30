@@ -19,4 +19,6 @@ jobs:
         run: chmod +x ./deploy_v2.sh
       
       - name: Deploy Application
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         run: ./deploy_v2.sh
