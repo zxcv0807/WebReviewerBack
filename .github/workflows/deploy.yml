@@ -23,11 +23,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # ✨ 새로 추가된 디버깅 단계
-      - name: Debug ENV_FILE content
+      # 2. GitHub Secret을 사용하여 .env 파일을 생성합니다. (✨ 수정된 부분)
+      - name: Create .env file
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         run: |
-          echo "Verifying the first line of the received secret:"
-          echo "${{ secrets.ENV_FILE }}" | head -n 1
+          echo "Creating .env file from secret..."
+          echo "$ENV_FILE_CONTENT" > .env
+          echo ".env file created successfully."
+          echo "Verifying first line of .env file:"
+          head -n 1 .env
 
       # 2. 권한 부여
       - name: Add execute permission to deploy script
