@@ -20,6 +20,10 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, validator
 from .db import supabase
 import requests
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -36,9 +40,18 @@ SECRET_KEY: str = _secret  # JWT 서명을 위한 비밀키
 ALGORITHM = os.getenv("ALGORITHM", "HS256")  # JWT 서명 알고리즘
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))  # 액세스 토큰 만료시간
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))  # 리프레시 토큰 만료시간
+EMAIL_VERIFICATION_EXPIRE_HOURS = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))  # 이메일 인증 토큰 만료시간
 
 # 쿠키 보안 설정
 COOKIE_SECURE = os.getenv("ENVIRONMENT", "development") == "production"
+
+# SMTP 이메일 설정
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+FROM_EMAIL = os.getenv("FROM_EMAIL", SMTP_USERNAME)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 
 # Google OAuth 2.0 설정
@@ -78,6 +91,115 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 # JWT refresh token 생성
+# 이메일 인증 토큰 생성
+def create_email_verification_token(user_id: int):
+    """
+    이메일 인증용 토큰 생성
+    Args:
+        user_id: 사용자 ID
+    Returns:
+        str: 인증 토큰
+    """
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=EMAIL_VERIFICATION_EXPIRE_HOURS)
+    
+    # 데이터베이스에 토큰 저장 (기존 토큰이 있으면 덮어쓰기)
+    try:
+        # 기존 토큰 삭제
+        supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
+        # 새 토큰 삽입
+        supabase.table("email_verification_token").insert({
+            "user_id": user_id,
+            "token": token,
+            "expires_at": expires_at.isoformat(),
+            "created_at": datetime.utcnow().isoformat()
+        }).execute()
+        return token
+    except Exception as e:
+        logger.error(f"Failed to create email verification token: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create verification token")
+
+# 이메일 인증 토큰 검증
+def verify_email_verification_token(token: str):
+    """
+    이메일 인증 토큰 검증
+    Args:
+        token: 인증 토큰
+    Returns:
+        int or None: 유효한 경우 사용자 ID, 무효한 경우 None
+    """
+    try:
+        result = supabase.table("email_verification_token").select("user_id", "expires_at").eq("token", token).execute()
+        if not result.data:
+            return None
+        
+        token_data = result.data[0]
+        expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
+        
+        # 토큰 만료 확인
+        if datetime.utcnow().replace(tzinfo=expires_at.tzinfo) > expires_at:
+            # 만료된 토큰 삭제
+            supabase.table("email_verification_token").delete().eq("token", token).execute()
+            return None
+        
+        return token_data["user_id"]
+    except Exception as e:
+        logger.error(f"Failed to verify email verification token: {str(e)}")
+        return None
+
+# 이메일 전송 함수
+def send_verification_email(email: str, username: str, token: str):
+    """
+    이메일 인증 메일 발송
+    Args:
+        email: 수신자 이메일
+        username: 사용자명
+        token: 인증 토큰
+    """
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        logger.warning("SMTP credentials not configured. Email will not be sent.")
+        return False
+    
+    try:
+        # 인증 링크 생성
+        verification_url = f"{FRONTEND_URL}/verify-email?token={token}"
+        
+        # 이메일 내용 작성
+        msg = MIMEMultipart()
+        msg['From'] = FROM_EMAIL
+        msg['To'] = email
+        msg['Subject'] = "이메일 주소 인증"
+        
+        body = f"""
+        안녕하세요 {username}님,
+        
+        웹 리뷰 플랫폼에 가입해 주셔서 감사합니다.
+        아래 링크를 클릭하여 이메일 주소를 인증해 주세요.
+        
+        {verification_url}
+        
+        이 링크는 24시간 후에 만료됩니다.
+        
+        감사합니다.
+        """
+        
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        
+        # SMTP 서버 연결 및 이메일 발송
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        text = msg.as_string()
+        server.sendmail(FROM_EMAIL, email, text)
+        server.quit()
+        
+        logger.info(f"Verification email sent to {email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send verification email: {str(e)}")
+        return False
+
 def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None):
     """
     Args:
@@ -183,6 +305,31 @@ class GoogleCallbackRequest(BaseModel):
     redirect_uri: str  # 콜백 URI
     state: Optional[str] = None  # CSRF 방지용 state 파라미터
 
+class UserUpdate(BaseModel):
+    """사용자 정보 수정 요청 모델"""
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    
+    @validator('username')
+    def validate_username(cls, v):
+        if v is not None:
+            if len(v) < 3 or len(v) > 20:
+                raise ValueError('사용자명은 3-20자 사이여야 합니다')
+            if not v.isalnum():
+                raise ValueError('사용자명은 영문자와 숫자만 허용됩니다')
+        return v
+
+class PasswordChange(BaseModel):
+    """비밀번호 변경 요청 모델"""
+    current_password: str
+    new_password: str
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('새 비밀번호는 8자 이상이어야 합니다')
+        return v
+
 # 일반 회원가입 엔드포인트
 @router.post("/signup")
 def signup(user: UserCreate):
@@ -207,13 +354,23 @@ def signup(user: UserCreate):
             "email": user.email,
             "password_hash": hashed_password,
             "created_at": created_at,
-            "role": "user"  # 기본 역할
+            "role": "user",  # 기본 역할
+            "email_verified": False  # 일반 회원가입은 이메일 인증 필요
         }).execute()
         
         if not insert_result.data:
             raise HTTPException(status_code=500, detail="Failed to create user")
         
-        return {"msg": "User created successfully"}
+        # 5. 이메일 인증 토큰 생성 및 발송
+        try:
+            user_id = insert_result.data[0]["id"]
+            token = create_email_verification_token(user_id)
+            send_verification_email(user.email, user.username, token)
+        except Exception as e:
+            logger.warning(f"Failed to send verification email: {str(e)}")
+            # 이메일 발송 실패해도 회원가입은 성공으로 처리
+        
+        return {"msg": "User created successfully. Please check your email for verification."}
     except HTTPException:
         raise
     except Exception as e:
@@ -369,7 +526,8 @@ async def google_callback(request: GoogleCallbackRequest, response: Response):
                     "google_id": google_id,
                     "password_hash": None,  # Google OAuth 사용자는 패스워드 없음
                     "created_at": created_at,
-                    "role": "user"  # 기본 역할
+                    "role": "user",  # 기본 역할
+                    "email_verified": True  # Google OAuth 사용자는 이미 이메일 인증됨
                 }).execute()
                 if insert_result.data:
                     user_row = insert_result.data[0]
@@ -487,4 +645,192 @@ def get_me(current_user=Depends(get_current_user)):
             "role": user_row["role"]
         }
     except Exception:
-        raise HTTPException(status_code=401, detail="User not found") 
+        raise HTTPException(status_code=401, detail="User not found")
+
+# 사용자 정보 수정
+@router.put("/me")
+def update_me(user_update: UserUpdate, current_user=Depends(get_current_user)):
+    try:
+        update_data = {}
+        
+        # 사용자명 변경 처리
+        if user_update.username is not None:
+            # 사용자명 중복 체크 (자기 자신 제외)
+            username_result = supabase.table("user").select("id").eq("username", user_update.username).neq("id", current_user["id"]).execute()
+            if username_result.data:
+                raise HTTPException(status_code=400, detail="Username already exists")
+            update_data["username"] = user_update.username
+        
+        # 이메일 변경 처리  
+        if user_update.email is not None:
+            # 이메일 중복 체크 (자기 자신 제외)
+            email_result = supabase.table("user").select("id").eq("email", user_update.email).neq("id", current_user["id"]).execute()
+            if email_result.data:
+                raise HTTPException(status_code=400, detail="Email already exists")
+            update_data["email"] = user_update.email
+        
+        # 업데이트할 데이터가 없는 경우
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No data to update")
+        
+        # 사용자 정보 업데이트
+        update_result = supabase.table("user").update(update_data).eq("id", current_user["id"]).execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to update user")
+        
+        # 업데이트된 사용자 정보 반환
+        updated_user = update_result.data[0]
+        return {
+            "id": updated_user["id"],
+            "username": updated_user["username"],
+            "email": updated_user["email"],
+            "role": updated_user["role"],
+            "message": "User information updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update user: {str(e)}")
+
+# 비밀번호 변경
+@router.put("/password")
+def change_password(password_change: PasswordChange, current_user=Depends(get_current_user)):
+    try:
+        # 현재 사용자 정보 조회
+        user_result = supabase.table("user").select("password_hash", "google_id").eq("id", current_user["id"]).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_row = user_result.data[0]
+        
+        # Google OAuth 전용 계정 체크 (비밀번호가 없는 경우)
+        if not user_row["password_hash"]:
+            raise HTTPException(status_code=400, detail="Cannot change password for Google OAuth account")
+        
+        # 현재 비밀번호 검증
+        if not verify_password(password_change.current_password, user_row["password_hash"]):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        
+        # 새 비밀번호 해싱
+        new_password_hash = get_password_hash(password_change.new_password)
+        
+        # 비밀번호 업데이트
+        update_result = supabase.table("user").update({"password_hash": new_password_hash}).eq("id", current_user["id"]).execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to update password")
+        
+        return {"message": "Password changed successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to change password: {str(e)}")
+
+# 계정 삭제
+@router.delete("/me")
+def delete_account(current_user=Depends(get_current_user)):
+    try:
+        user_id = current_user["id"]
+        
+        # 관련 데이터 연쇄 삭제 (트랜잭션처럼 처리)
+        # 1. 투표 기록 삭제
+        supabase.table("review_vote").delete().eq("user_id", user_id).execute()
+        supabase.table("post_vote").delete().eq("user_id", user_id).execute()
+        supabase.table("phishing_vote").delete().eq("user_id", user_id).execute()
+        
+        # 2. 댓글 삭제
+        supabase.table("review_comment").delete().eq("user_id", user_id).execute()
+        supabase.table("post_comment").delete().eq("user_id", user_id).execute()
+        supabase.table("phishing_comment").delete().eq("user_id", user_id).execute()
+        
+        # 3. 게시물/리뷰/피싱 신고 삭제
+        supabase.table("post").delete().eq("user_id", user_id).execute()
+        supabase.table("review").delete().eq("user_id", user_id).execute()
+        supabase.table("phishing_site").delete().eq("user_id", user_id).execute()
+        
+        # 4. 사용자 계정 삭제
+        delete_result = supabase.table("user").delete().eq("id", user_id).execute()
+        
+        if not delete_result.data:
+            raise HTTPException(status_code=500, detail="Failed to delete account")
+        
+        return {"message": "Account deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
+
+# 이메일 인증 메일 발송
+@router.post("/send-verification-email")
+def send_verification_email_api(current_user=Depends(get_current_user)):
+    try:
+        user_id = current_user["id"]
+        
+        # 사용자 정보 조회
+        user_result = supabase.table("user").select("email", "username", "email_verified").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_data = user_result.data[0]
+        
+        # 이미 인증된 경우
+        if user_data.get("email_verified"):
+            raise HTTPException(status_code=400, detail="Email is already verified")
+        
+        # 인증 토큰 생성
+        token = create_email_verification_token(user_id)
+        
+        # 인증 이메일 발송
+        if send_verification_email(user_data["email"], user_data["username"], token):
+            return {"message": "Verification email sent successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send verification email")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send verification email: {str(e)}")
+
+# 이메일 인증 처리
+@router.get("/verify-email/{token}")
+def verify_email_api(token: str):
+    try:
+        # 토큰 검증
+        user_id = verify_email_verification_token(token)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+        
+        # 사용자 이메일 인증 상태 업데이트
+        update_result = supabase.table("user").update({"email_verified": True}).eq("id", user_id).execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to verify email")
+        
+        # 사용된 토큰 삭제
+        supabase.table("email_verification_token").delete().eq("token", token).execute()
+        
+        return {"message": "Email verified successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to verify email: {str(e)}")
+
+# 이메일 인증 상태 확인
+@router.get("/email-verification-status")
+def get_email_verification_status(current_user=Depends(get_current_user)):
+    try:
+        user_result = supabase.table("user").select("email_verified").eq("id", current_user["id"]).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {"email_verified": user_result.data[0]["email_verified"]}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get verification status: {str(e)}") 

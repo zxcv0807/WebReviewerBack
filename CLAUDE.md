@@ -188,6 +188,27 @@
 | phishing_site    | created_at       | timestamp without time zone | NO          |
 | phishing_site    | view_count       | integer                     | YES         |
 | phishing_site    | like_count       | integer                     | YES         |
+| table_name       | column_name      | data_type                   | is_nullable |
+| ---------------- | ---------------- | --------------------------- | ----------- |
+| image            | id               | integer                     | NO          |
+| image            | url              | text                        | NO          |
+| image            | filename         | text                        | YES         |
+| image            | uploaded_at      | timestamp without time zone | NO          |
+| image            | storage_path     | character varying           | YES         |
+| phishing_comment | id               | integer                     | NO          |
+| phishing_comment | phishing_site_id | integer                     | NO          |
+| phishing_comment | user_id          | integer                     | NO          |
+| phishing_comment | content          | text                        | NO          |
+| phishing_comment | created_at       | timestamp without time zone | NO          |
+| phishing_comment | updated_at       | timestamp without time zone | YES         |
+| phishing_site    | id               | integer                     | NO          |
+| phishing_site    | url              | text                        | NO          |
+| phishing_site    | reason           | text                        | NO          |
+| phishing_site    | description      | text                        | YES         |
+| phishing_site    | status           | text                        | NO          |
+| phishing_site    | created_at       | timestamp without time zone | NO          |
+| phishing_site    | view_count       | integer                     | YES         |
+| phishing_site    | like_count       | integer                     | YES         |
 | phishing_site    | dislike_count    | integer                     | YES         |
 | phishing_site    | user_id          | integer                     | YES         |
 | phishing_site    | updated_at       | timestamp without time zone | YES         |
@@ -252,3 +273,4 @@
 | user             | created_at       | timestamp without time zone | NO          |
 | user             | role             | text                        | NO          |
 | user             | google_id        | text                        | YES         |
+| user             | email_verified   | boolean                     | YES         |
