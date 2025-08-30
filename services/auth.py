@@ -363,25 +363,7 @@ class EmailVerificationCode(BaseModel):
             raise ValueError('인증 코드는 숫자와 영문만 허용됩니다')
         return v.upper()  # 대문자로 변환
 
-class SignupRequest(BaseModel):
-    """임시 회원가입 요청 모델"""
-    username: str
-    email: EmailStr
-    password: str
-    
-    @validator('username')
-    def validate_username(cls, v):
-        if len(v) < 3 or len(v) > 20:
-            raise ValueError('사용자명은 3-20자 사이여야 합니다')
-        if not v.isalnum():
-            raise ValueError('사용자명은 영문자와 숫자만 허용됩니다')
-        return v
-    
-    @validator('password')
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('비밀번호는 8자 이상이어야 합니다')
-        return v
+# Deprecated: SignupRequest 모델은 더 이상 사용하지 않음 (기존 UserCreate 사용)
 
 class VerifySignup(BaseModel):
     """회원가입 인증 완료 요청 모델"""
@@ -396,107 +378,24 @@ class VerifySignup(BaseModel):
             raise ValueError('인증 코드는 숫자와 영문만 허용됩니다')
         return v.upper()  # 대문자로 변환
 
-# 임시 계정 생성 및 인증 코드 발송 엔드포인트
+# 임시 계정 생성 엔드포인트 (더 이상 사용하지 않음)
 @router.post("/signup-request")
-def signup_request(user: SignupRequest):
+def signup_request(user: UserCreate):
     """
-    임시 계정 생성 및 이메일 인증 코드 발송
-    - 임시로 계정을 생성하되 email_verified=False로 설정
-    - 인증 코드를 이메일로 발송
-    - 실제 활성화는 인증 완료 후에 이루어짐
+    Deprecated: Use /signup instead
+    이 엔드포인트는 더 이상 사용되지 않습니다. /signup을 사용하세요.
     """
-    try:
-        # 1. 기존 계정 전체 조회 (이메일 + 사용자명)
-        email_result = supabase.table("user").select("*").eq("email", user.email).execute()
-        username_result = supabase.table("user").select("*").eq("username", user.username).execute()
-        
-        # 2. 미인증 계정 삭제 처리
-        accounts_to_delete = []
-        
-        # 이메일 중복 체크
-        if email_result.data:
-            existing_user = email_result.data[0]
-            if not existing_user.get("email_verified"):
-                accounts_to_delete.append(existing_user["id"])
-                logger.info(f"Will delete unverified account for email: {user.email}")
-            else:
-                raise HTTPException(status_code=400, detail="Email already registered")
-        
-        # 사용자명 중복 체크
-        if username_result.data:
-            for existing_user in username_result.data:
-                if existing_user.get("email_verified"):
-                    raise HTTPException(status_code=400, detail="Username already registered")
-                else:
-                    if existing_user["id"] not in accounts_to_delete:  # 중복 삭제 방지
-                        accounts_to_delete.append(existing_user["id"])
-                        logger.info(f"Will delete unverified account for username: {user.username}")
-        
-        # 3. 미인증 계정들 일괄 삭제
-        for account_id in accounts_to_delete:
-            try:
-                supabase.table("email_verification_token").delete().eq("user_id", account_id).execute()
-                supabase.table("user").delete().eq("id", account_id).execute()
-                logger.info(f"Deleted unverified account with ID: {account_id}")
-            except Exception as e:
-                logger.warning(f"Failed to delete account {account_id}: {str(e)}")
-        
-        # 4. 삭제 후 최종 중복 체크 (안전장치)
-        if accounts_to_delete:
-            # 삭제 후 재확인
-            final_email_check = supabase.table("user").select("id").eq("email", user.email).execute()
-            final_username_check = supabase.table("user").select("id").eq("username", user.username).execute()
-            
-            if final_email_check.data:
-                raise HTTPException(status_code=400, detail="Email already registered")
-            if final_username_check.data:
-                raise HTTPException(status_code=400, detail="Username already registered")
-        
-        # 5. 패스워드 해싱
-        hashed_password = get_password_hash(user.password)
-        created_at = datetime.utcnow().isoformat()
-        
-        # 6. 임시 계정 생성 (미인증 상태)
-        insert_result = supabase.table("user").insert({
-            "username": user.username,
-            "email": user.email,
-            "password_hash": hashed_password,
-            "created_at": created_at,
-            "role": "user",
-            "email_verified": False  # 미인증 상태로 생성
-        }).execute()
-        
-        if not insert_result.data:
-            raise HTTPException(status_code=500, detail="Failed to create user")
-        
-        # 7. 인증 코드 생성 및 발송
-        try:
-            user_id = insert_result.data[0]["id"]
-            code = create_email_verification_code(user_id)
-            if send_verification_code_email(user.email, user.username, code):
-                return {
-                    "message": "Signup request successful. Please check your email for verification code.",
-                    "email": user.email
-                }
-            else:
-                # 이메일 발송 실패 시 계정 삭제
-                supabase.table("user").delete().eq("id", user_id).execute()
-                raise HTTPException(status_code=500, detail="Failed to send verification email")
-        except Exception as e:
-            # 인증 코드 생성/발송 실패 시 계정 삭제
-            if insert_result.data:
-                supabase.table("user").delete().eq("id", insert_result.data[0]["id"]).execute()
-            logger.error(f"Failed to send verification code: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to send verification code")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Signup request failed: {str(e)}")
+    raise HTTPException(status_code=410, detail="This endpoint is deprecated. Please use /signup instead.")
 
-# 기존 회원가입 엔드포인트 (더 이상 사용하지 않지만 하위호환성을 위해 유지)
+# 회원가입 엔드포인트 (이메일 인증 필수)
 @router.post("/signup")
 def signup(user: UserCreate):
+    """
+    회원가입 후 즉시 이메일 인증 필요
+    - 계정을 생성하되 email_verified=False로 설정
+    - 인증 코드를 이메일로 발송
+    - 인증 완료 전까지 로그인 불가
+    """
     try:
         # 1. 사용자명 중복 체크
         username_result = supabase.table("user").select("*").eq("username", user.username).execute()
@@ -512,80 +411,94 @@ def signup(user: UserCreate):
         hashed_password = get_password_hash(user.password)
         created_at = datetime.utcnow().isoformat()
         
-        # 4. 사용자 데이터 삽입
+        # 4. 미인증 계정 생성
         insert_result = supabase.table("user").insert({
             "username": user.username,
             "email": user.email,
             "password_hash": hashed_password,
             "created_at": created_at,
-            "role": "user",  # 기본 역할
-            "email_verified": False  # 일반 회원가입은 이메일 인증 필요
+            "role": "user",
+            "email_verified": False  # 이메일 인증 필수
         }).execute()
         
         if not insert_result.data:
             raise HTTPException(status_code=500, detail="Failed to create user")
         
-        # 5. 이메일 인증 코드 생성 및 발송
+        # 5. 인증 코드 생성 및 발송
         try:
             user_id = insert_result.data[0]["id"]
             code = create_email_verification_code(user_id)
-            send_verification_code_email(user.email, user.username, code)
+            if send_verification_code_email(user.email, user.username, code):
+                return {
+                    "message": "User created successfully. Please check your email for verification code.",
+                    "email": user.email,
+                    "user_id": user_id
+                }
+            else:
+                # 이메일 발송 실패 시 계정 삭제
+                supabase.table("user").delete().eq("id", user_id).execute()
+                raise HTTPException(status_code=500, detail="Failed to send verification email")
         except Exception as e:
-            logger.warning(f"Failed to send verification code email: {str(e)}")
-            # 이메일 발송 실패해도 회원가입은 성공으로 처리
+            # 이메일 발송 실패 시 계정 삭제
+            if insert_result.data:
+                supabase.table("user").delete().eq("id", insert_result.data[0]["id"]).execute()
+            logger.error(f"Failed to send verification code: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to send verification code")
         
-        return {
-            "msg": "User created successfully. Please check your email for verification.",
-            "warning": "This endpoint is deprecated. Please use /signup-request instead."
-        }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
-# 회원가입 인증 완료 엔드포인트
-@router.post("/verify-signup")
-def verify_signup(request: VerifySignup):
+# 회원가입 인증 완료 엔드포인트 (인증 후 바로 로그인)
+@router.post("/verify-signup")  
+def verify_signup(request: VerifySignup, response: Response):
     """
-    회원가입 인증 완료 및 계정 활성화
+    회원가입 인증 완료 및 자동 로그인
     - 인증 코드 검증
-    - 계정 활성화 (email_verified=True)
-    - 로그인 토큰 반환
+    - 계정 활성화
+    - 바로 로그인 토큰 반환 (쿠키 설정 포함)
     """
     try:
-        # 1. 이메일로 미인증 사용자 검색
-        user_result = supabase.table("user").select("*").eq("email", request.email).eq("email_verified", False).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=400, detail="No pending signup found for this email")
-        
-        user_data = user_result.data[0]
-        user_id = user_data["id"]
-        
-        # 2. 인증 코드 검증
-        verified_user_id = verify_email_verification_code(request.code)
-        if not verified_user_id or verified_user_id != user_id:
+        # 1. 인증 코드 검증
+        user_id = verify_email_verification_code(request.code)
+        if not user_id:
             raise HTTPException(status_code=400, detail="Invalid or expired verification code")
         
-        # 3. 계정 활성화 (updated_at 필드 제거)
-        update_result = supabase.table("user").update({
-            "email_verified": True
-        }).eq("id", user_id).execute()
+        # 2. 사용자 정보 조회
+        user_result = supabase.table("user").select("*").eq("id", user_id).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=400, detail="User not found")
         
-        if not update_result.data:
-            raise HTTPException(status_code=500, detail="Failed to activate account")
+        user_data = user_result.data[0]
+        
+        # 이메일 확인
+        if user_data["email"] != request.email:
+            raise HTTPException(status_code=400, detail="Email mismatch")
+        
+        # 3. 계정 활성화
+        supabase.table("user").update({"email_verified": True}).eq("id", user_id).execute()
         
         # 4. 사용된 인증 코드 삭제
         supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
         
-        # 5. 로그인 토큰 생성 및 반환
+        # 5. 로그인 토큰 생성
         access_token = create_access_token(data={"sub": str(user_id), "role": user_data["role"]})
         refresh_token = create_refresh_token(data={"sub": str(user_id), "role": user_data["role"]})
         
-        # 6. 성공 응답 (리프레시 토큰은 별도 쿠키 설정 필요)
+        # 6. 리프레시 토큰을 HttpOnly 쿠키로 설정
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+        )
+        
         return {
-            "message": "Signup verification successful. Account activated.",
+            "message": "Email verification successful. Welcome!",
             "access_token": access_token,
-            "refresh_token": refresh_token,  # 프론트엔드에서 쿠키로 설정 필요
             "token_type": "bearer",
             "user": {
                 "id": user_data["id"],
