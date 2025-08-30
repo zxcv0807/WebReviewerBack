@@ -406,12 +406,7 @@ def signup_request(user: SignupRequest):
     - 실제 활성화는 인증 완료 후에 이루어짐
     """
     try:
-        # 1. 사용자명 중복 체크
-        username_result = supabase.table("user").select("*").eq("username", user.username).execute()
-        if username_result.data:
-            raise HTTPException(status_code=400, detail="Username already registered")
-        
-        # 2. 이메일 중복 체크
+        # 1. 이메일 중복 체크 먼저 수행
         email_result = supabase.table("user").select("*").eq("email", user.email).execute()
         if email_result.data:
             # 기존에 미인증 계정이 있다면 삭제하고 새로 생성
@@ -422,6 +417,20 @@ def signup_request(user: SignupRequest):
                 logger.info(f"Deleted existing unverified account for email: {user.email}")
             else:
                 raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # 2. 사용자명 중복 체크 (미인증 계정 삭제 후)
+        username_result = supabase.table("user").select("*").eq("username", user.username).execute()
+        if username_result.data:
+            # 인증된 계정 중에 같은 사용자명이 있는지 확인
+            verified_username = [u for u in username_result.data if u.get("email_verified")]
+            if verified_username:
+                raise HTTPException(status_code=400, detail="Username already registered")
+            # 미인증 계정은 삭제
+            for unverified_user in username_result.data:
+                if not unverified_user.get("email_verified"):
+                    supabase.table("user").delete().eq("id", unverified_user["id"]).execute()
+                    supabase.table("email_verification_token").delete().eq("user_id", unverified_user["id"]).execute()
+                    logger.info(f"Deleted existing unverified account for username: {user.username}")
         
         # 3. 패스워드 해싱
         hashed_password = get_password_hash(user.password)
@@ -537,10 +546,9 @@ def verify_signup(request: VerifySignup):
         if not verified_user_id or verified_user_id != user_id:
             raise HTTPException(status_code=400, detail="Invalid or expired verification code")
         
-        # 3. 계정 활성화
+        # 3. 계정 활성화 (updated_at 필드 제거)
         update_result = supabase.table("user").update({
-            "email_verified": True,
-            "updated_at": datetime.utcnow().isoformat()
+            "email_verified": True
         }).eq("id", user_id).execute()
         
         if not update_result.data:
