@@ -91,94 +91,104 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 # JWT refresh token 생성
-# 이메일 인증 토큰 생성
-def create_email_verification_token(user_id: int):
+# 이메일 인증 코드 생성 (6자리 숫자/영문 조합)
+def create_email_verification_code(user_id: int):
     """
-    이메일 인증용 토큰 생성
+    이메일 인증용 6자리 코드 생성
     Args:
         user_id: 사용자 ID
     Returns:
-        str: 인증 토큰
+        str: 6자리 인증 코드
     """
-    token = secrets.token_urlsafe(32)
+    import string
+    import random
+    
+    # 6자리 코드 생성 (숫자+대문자 영문)
+    characters = string.digits + string.ascii_uppercase
+    code = ''.join(random.choices(characters, k=6))
     expires_at = datetime.utcnow() + timedelta(hours=EMAIL_VERIFICATION_EXPIRE_HOURS)
     
-    # 데이터베이스에 토큰 저장 (기존 토큰이 있으면 덮어쓰기)
+    # 데이터베이스에 코드 저장 (기존 코드가 있으면 덮어쓰기)
     try:
-        # 기존 토큰 삭제
+        # 기존 코드 삭제
         supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
-        # 새 토큰 삽입
+        # 새 코드 삽입 (token 필드를 code로 재사용)
         supabase.table("email_verification_token").insert({
             "user_id": user_id,
-            "token": token,
+            "token": code,  # code를 token 필드에 저장
             "expires_at": expires_at.isoformat(),
             "created_at": datetime.utcnow().isoformat()
         }).execute()
-        return token
+        return code
     except Exception as e:
-        logger.error(f"Failed to create email verification token: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create verification token")
+        logger.error(f"Failed to create email verification code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create verification code")
 
-# 이메일 인증 토큰 검증
-def verify_email_verification_token(token: str):
+# 이메일 인증 코드 검증
+def verify_email_verification_code(code: str):
     """
-    이메일 인증 토큰 검증
+    이메일 인증 코드 검증
     Args:
-        token: 인증 토큰
+        code: 6자리 인증 코드
     Returns:
         int or None: 유효한 경우 사용자 ID, 무효한 경우 None
     """
     try:
-        result = supabase.table("email_verification_token").select("user_id", "expires_at").eq("token", token).execute()
+        # 코드 형식 검증 (6자리 숫자+영문 대문자)
+        if not code or len(code) != 6 or not code.isalnum():
+            return None
+        
+        # 대문자로 변환하여 검색 (대소문자 구분 없이)
+        code = code.upper()
+        
+        result = supabase.table("email_verification_token").select("user_id", "expires_at").eq("token", code).execute()
         if not result.data:
             return None
         
-        token_data = result.data[0]
-        expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
+        code_data = result.data[0]
+        expires_at = datetime.fromisoformat(code_data["expires_at"].replace("Z", "+00:00"))
         
-        # 토큰 만료 확인
+        # 코드 만료 확인
         if datetime.utcnow().replace(tzinfo=expires_at.tzinfo) > expires_at:
-            # 만료된 토큰 삭제
-            supabase.table("email_verification_token").delete().eq("token", token).execute()
+            # 만료된 코드 삭제
+            supabase.table("email_verification_token").delete().eq("token", code).execute()
             return None
         
-        return token_data["user_id"]
+        return code_data["user_id"]
     except Exception as e:
-        logger.error(f"Failed to verify email verification token: {str(e)}")
+        logger.error(f"Failed to verify email verification code: {str(e)}")
         return None
 
-# 이메일 전송 함수
-def send_verification_email(email: str, username: str, token: str):
+# 이메일 인증 코드 전송 함수
+def send_verification_code_email(email: str, username: str, code: str):
     """
-    이메일 인증 메일 발송
+    이메일 인증 코드 발송
     Args:
         email: 수신자 이메일
         username: 사용자명
-        token: 인증 토큰
+        code: 6자리 인증 코드
     """
     if not SMTP_USERNAME or not SMTP_PASSWORD:
         logger.warning("SMTP credentials not configured. Email will not be sent.")
         return False
     
     try:
-        # 인증 링크 생성
-        verification_url = f"{FRONTEND_URL}/verify-email?token={token}"
-        
         # 이메일 내용 작성
         msg = MIMEMultipart()
         msg['From'] = FROM_EMAIL
         msg['To'] = email
-        msg['Subject'] = "이메일 주소 인증"
+        msg['Subject'] = "이메일 주소 인증 코드"
         
         body = f"""
         안녕하세요 {username}님,
         
         웹 리뷰 플랫폼에 가입해 주셔서 감사합니다.
-        아래 링크를 클릭하여 이메일 주소를 인증해 주세요.
+        아래 인증 코드를 웹사이트에 입력하여 이메일 주소를 인증해 주세요.
         
-        {verification_url}
+        인증 코드: {code}
         
-        이 링크는 24시간 후에 만료됩니다.
+        이 코드는 24시간 후에 만료됩니다.
+        보안을 위해 이 코드를 다른 사람과 공유하지 마세요.
         
         감사합니다.
         """
@@ -193,11 +203,11 @@ def send_verification_email(email: str, username: str, token: str):
         server.sendmail(FROM_EMAIL, email, text)
         server.quit()
         
-        logger.info(f"Verification email sent to {email}")
+        logger.info(f"Verification code email sent to {email}")
         return True
         
     except Exception as e:
-        logger.error(f"Failed to send verification email: {str(e)}")
+        logger.error(f"Failed to send verification code email: {str(e)}")
         return False
 
 def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -330,6 +340,18 @@ class PasswordChange(BaseModel):
             raise ValueError('새 비밀번호는 8자 이상이어야 합니다')
         return v
 
+class EmailVerificationCode(BaseModel):
+    """이메일 인증 코드 요청 모델"""
+    code: str
+    
+    @validator('code')
+    def validate_code(cls, v):
+        if not v or len(v) != 6:
+            raise ValueError('인증 코드는 6자리여야 합니다')
+        if not v.isalnum():
+            raise ValueError('인증 코드는 숫자와 영문만 허용됩니다')
+        return v.upper()  # 대문자로 변환
+
 # 일반 회원가입 엔드포인트
 @router.post("/signup")
 def signup(user: UserCreate):
@@ -361,13 +383,13 @@ def signup(user: UserCreate):
         if not insert_result.data:
             raise HTTPException(status_code=500, detail="Failed to create user")
         
-        # 5. 이메일 인증 토큰 생성 및 발송
+        # 5. 이메일 인증 코드 생성 및 발송
         try:
             user_id = insert_result.data[0]["id"]
-            token = create_email_verification_token(user_id)
-            send_verification_email(user.email, user.username, token)
+            code = create_email_verification_code(user_id)
+            send_verification_code_email(user.email, user.username, code)
         except Exception as e:
-            logger.warning(f"Failed to send verification email: {str(e)}")
+            logger.warning(f"Failed to send verification code email: {str(e)}")
             # 이메일 발송 실패해도 회원가입은 성공으로 처리
         
         return {"msg": "User created successfully. Please check your email for verification."}
@@ -781,28 +803,28 @@ def send_verification_email_api(current_user=Depends(get_current_user)):
         if user_data.get("email_verified"):
             raise HTTPException(status_code=400, detail="Email is already verified")
         
-        # 인증 토큰 생성
-        token = create_email_verification_token(user_id)
+        # 인증 코드 생성
+        code = create_email_verification_code(user_id)
         
-        # 인증 이메일 발송
-        if send_verification_email(user_data["email"], user_data["username"], token):
-            return {"message": "Verification email sent successfully"}
+        # 인증 코드 이메일 발송
+        if send_verification_code_email(user_data["email"], user_data["username"], code):
+            return {"message": "Verification code email sent successfully"}
         else:
-            raise HTTPException(status_code=500, detail="Failed to send verification email")
+            raise HTTPException(status_code=500, detail="Failed to send verification code email")
         
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send verification email: {str(e)}")
 
-# 이메일 인증 처리
-@router.get("/verify-email/{token}")
-def verify_email_api(token: str):
+# 이메일 인증 코드 처리
+@router.post("/verify-email-code")
+def verify_email_code_api(request: EmailVerificationCode):
     try:
-        # 토큰 검증
-        user_id = verify_email_verification_token(token)
+        # 코드 검증
+        user_id = verify_email_verification_code(request.code)
         if not user_id:
-            raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+            raise HTTPException(status_code=400, detail="Invalid or expired verification code")
         
         # 사용자 이메일 인증 상태 업데이트
         update_result = supabase.table("user").update({"email_verified": True}).eq("id", user_id).execute()
@@ -810,8 +832,8 @@ def verify_email_api(token: str):
         if not update_result.data:
             raise HTTPException(status_code=500, detail="Failed to verify email")
         
-        # 사용된 토큰 삭제
-        supabase.table("email_verification_token").delete().eq("token", token).execute()
+        # 사용된 코드 삭제
+        supabase.table("email_verification_token").delete().eq("token", request.code).execute()
         
         return {"message": "Email verified successfully"}
         
