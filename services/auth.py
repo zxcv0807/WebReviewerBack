@@ -725,17 +725,32 @@ def login(user: UserLogin, response: Response):
         if not user_result.data:
             raise HTTPException(status_code=401, detail="Incorrect email or password")
         
-        # 2. 이메일 인증 상태 확인
+        # 2. 패스워드 검증 (먼저 패스워드를 확인)
         user_row = user_result.data[0]
-        if not user_row.get("email_verified"):
-            raise HTTPException(
-                status_code=403, 
-                detail="Email verification required. Please complete email verification to login."
-            )
-        
-        # 3. 패스워드 검증
         if not verify_password(user.password, user_row["password_hash"]):
             raise HTTPException(status_code=401, detail="Incorrect email or password")
+        
+        # 3. 이메일 인증 상태 확인
+        if not user_row.get("email_verified"):
+            # 미인증 사용자에게 인증 코드 자동 재발송
+            try:
+                code = create_email_verification_code(user_row["id"])
+                send_verification_code_email(user_row["email"], user_row["username"], code)
+                logger.info(f"Verification code resent to unverified user: {user_row['email']}")
+            except Exception as e:
+                logger.error(f"Failed to resend verification code: {str(e)}")
+            
+            # 사용자에게 친화적인 응답 제공
+            raise HTTPException(
+                status_code=403, 
+                detail={
+                    "error": "email_verification_required",
+                    "message": "Email verification required to login.",
+                    "action": "verification_code_sent",
+                    "email": user_row["email"],
+                    "user_id": user_row["id"]
+                }
+            )
         
         # 4. JWT 토큰 생성
         access_token = create_access_token(data={"sub": str(user_row["id"]), "role": user_row["role"]})
@@ -1111,7 +1126,47 @@ def delete_account(current_user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
 
-# 이메일 인증 메일 발송
+# JWT 토큰 없이 인증 코드 재발송 (이메일 + 패스워드 인증)
+@router.post("/resend-verification-code")
+def resend_verification_code(user: UserLogin):
+    """
+    JWT 토큰 없이 인증 코드 재발송
+    - 이메일과 패스워드로 본인 확인
+    - 미인증 계정에게만 인증 코드 재발송
+    """
+    try:
+        # 1. 사용자 확인
+        user_result = supabase.table("user").select("*").eq("email", user.email).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_row = user_result.data[0]
+        
+        # 2. 패스워드 검증
+        if not verify_password(user.password, user_row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Incorrect password")
+        
+        # 3. 이미 인증된 계정 확인
+        if user_row.get("email_verified"):
+            raise HTTPException(status_code=400, detail="Email is already verified")
+        
+        # 4. 인증 코드 생성 및 발송
+        code = create_email_verification_code(user_row["id"])
+        if send_verification_code_email(user_row["email"], user_row["username"], code):
+            return {
+                "message": "Verification code sent successfully",
+                "email": user_row["email"],
+                "user_id": user_row["id"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send verification code")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to resend verification code: {str(e)}")
+
+# 이메일 인증 메일 발송 (JWT 토큰 필요)
 @router.post("/send-verification-email")
 def send_verification_email_api(current_user=Depends(get_current_user)):
     try:
