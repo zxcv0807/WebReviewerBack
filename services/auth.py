@@ -397,37 +397,80 @@ def signup(user: UserCreate):
     - 인증 완료 전까지 로그인 불가
     """
     try:
-        # 1. 사용자명 중복 체크
-        username_result = supabase.table("user").select("*").eq("username", user.username).execute()
-        if username_result.data:
-            raise HTTPException(status_code=400, detail="Username already registered")
+        # 1. 통합된 중복 체크 및 미인증 계정 정리
+        # 사용자명과 이메일 모두 한번에 체크하여 race condition 방지
+        existing_users_result = supabase.table("user").select("*").or_(f"username.eq.{user.username},email.eq.{user.email}").execute()
         
-        # 2. 이메일 중복 체크
-        email_result = supabase.table("user").select("*").eq("email", user.email).execute()
-        if email_result.data:
-            raise HTTPException(status_code=400, detail="Email already registered")
+        users_to_delete = []
+        for existing_user in existing_users_result.data:
+            if existing_user.get("email_verified"):
+                # 인증된 계정이면 중복 에러
+                if existing_user["username"] == user.username:
+                    raise HTTPException(status_code=400, detail="Username already registered")
+                if existing_user["email"] == user.email:
+                    raise HTTPException(status_code=400, detail="Email already registered")
+            else:
+                # 미인증 계정이면 삭제 대상으로 추가
+                users_to_delete.append(existing_user["id"])
+                logger.info(f"Found unverified account to delete: {existing_user['username']} ({existing_user['email']})")
+        
+        # 2. 미인증 계정들 일괄 삭제
+        for user_id in users_to_delete:
+            try:
+                supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
+                supabase.table("user").delete().eq("id", user_id).execute()
+                logger.info(f"Deleted unverified account with ID: {user_id}")
+            except Exception as delete_error:
+                logger.warning(f"Failed to delete unverified account {user_id}: {str(delete_error)}")
         
         # 3. 패스워드 해싱
         hashed_password = get_password_hash(user.password)
         created_at = datetime.utcnow().isoformat()
         
-        # 4. 미인증 계정 생성
-        insert_result = supabase.table("user").insert({
-            "username": user.username,
-            "email": user.email,
-            "password_hash": hashed_password,
-            "created_at": created_at,
-            "role": "user",
-            "email_verified": False  # 이메일 인증 필수
-        }).execute()
-        
-        if not insert_result.data:
-            raise HTTPException(status_code=500, detail="Failed to create user")
+        # 4. 새 계정 생성 (고유 제약 조건 위반 방지를 위한 재시도 로직)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                insert_result = supabase.table("user").insert({
+                    "username": user.username,
+                    "email": user.email,
+                    "password_hash": hashed_password,
+                    "created_at": created_at,
+                    "role": "user",
+                    "email_verified": False  # 이메일 인증 필수
+                }).execute()
+                
+                if insert_result.data:
+                    break
+                else:
+                    raise Exception("No data returned from insert")
+                    
+            except Exception as insert_error:
+                if attempt == max_retries - 1:
+                    # 마지막 시도에서도 실패하면 에러 발생
+                    logger.error(f"Failed to create user after {max_retries} attempts: {str(insert_error)}")
+                    if "duplicate key" in str(insert_error).lower():
+                        # 중복 키 에러인 경우 더 구체적인 메시지
+                        if "username" in str(insert_error).lower():
+                            raise HTTPException(status_code=400, detail="Username already exists")
+                        elif "email" in str(insert_error).lower():
+                            raise HTTPException(status_code=400, detail="Email already exists")
+                        else:
+                            raise HTTPException(status_code=400, detail="User already exists")
+                    else:
+                        raise HTTPException(status_code=500, detail="Failed to create user")
+                else:
+                    # 재시도 전에 잠시 대기
+                    import time
+                    time.sleep(0.1)
+                    logger.warning(f"User creation attempt {attempt + 1} failed, retrying: {str(insert_error)}")
         
         # 5. 인증 코드 생성 및 발송
+        user_id = None
         try:
             user_id = insert_result.data[0]["id"]
             code = create_email_verification_code(user_id)
+            
             if send_verification_code_email(user.email, user.username, code):
                 return {
                     "message": "User created successfully. Please check your email for verification code.",
@@ -436,18 +479,27 @@ def signup(user: UserCreate):
                 }
             else:
                 # 이메일 발송 실패 시 계정 삭제
+                supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
                 supabase.table("user").delete().eq("id", user_id).execute()
                 raise HTTPException(status_code=500, detail="Failed to send verification email")
+                
+        except HTTPException:
+            raise
         except Exception as e:
             # 이메일 발송 실패 시 계정 삭제
-            if insert_result.data:
-                supabase.table("user").delete().eq("id", insert_result.data[0]["id"]).execute()
+            if user_id:
+                try:
+                    supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
+                    supabase.table("user").delete().eq("id", user_id).execute()
+                except:
+                    pass  # 삭제 실패는 무시
             logger.error(f"Failed to send verification code: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to send verification code")
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Unexpected error in signup: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
 # 회원가입 인증 완료 엔드포인트 (인증 후 바로 로그인)
