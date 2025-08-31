@@ -24,6 +24,9 @@ import secrets
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import asyncio
+import threading
+import time
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -41,6 +44,10 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")  # JWT 서명 알고리즘
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))  # 액세스 토큰 만료시간
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))  # 리프레시 토큰 만료시간
 EMAIL_VERIFICATION_EXPIRE_HOURS = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_HOURS", "24"))  # 이메일 인증 토큰 만료시간
+
+# TTL(Time To Live) 설정 - 미인증 계정 자동 삭제
+UNVERIFIED_ACCOUNT_TTL_HOURS = int(os.getenv("UNVERIFIED_ACCOUNT_TTL_HOURS", "24"))  # 미인증 계정 TTL (기본: 72시간)
+CLEANUP_SCHEDULE_HOURS = int(os.getenv("CLEANUP_SCHEDULE_HOURS", "6"))  # 정리 작업 주기 (기본: 6시간마다)
 
 # 쿠키 보안 설정
 COOKIE_SECURE = os.getenv("ENVIRONMENT", "development") == "production"
@@ -209,6 +216,127 @@ def send_verification_code_email(email: str, username: str, code: str):
     except Exception as e:
         logger.error(f"Failed to send verification code email: {str(e)}")
         return False
+
+# TTL 기반 미인증 계정 자동 정리 시스템
+def cleanup_unverified_accounts():
+    """
+    TTL이 만료된 미인증 계정들을 자동으로 정리하는 함수
+    - UNVERIFIED_ACCOUNT_TTL_HOURS 시간이 지난 미인증 계정 삭제
+    - 관련 인증 토큰도 함께 삭제
+    """
+    try:
+        # TTL 기준 시점 계산
+        ttl_threshold = datetime.utcnow() - timedelta(hours=UNVERIFIED_ACCOUNT_TTL_HOURS)
+        ttl_threshold_iso = ttl_threshold.isoformat()
+        
+        # 만료된 미인증 계정 조회
+        expired_users_result = supabase.table("user").select("id", "username", "email", "created_at").eq("email_verified", False).lt("created_at", ttl_threshold_iso).execute()
+        
+        if not expired_users_result.data:
+            logger.info("No expired unverified accounts found for cleanup")
+            return {"deleted_count": 0, "message": "No accounts to cleanup"}
+        
+        deleted_count = 0
+        failed_count = 0
+        
+        for user in expired_users_result.data:
+            try:
+                user_id = user["id"]
+                username = user["username"]
+                email = user["email"]
+                created_at = user["created_at"]
+                
+                # 관련 인증 토큰 삭제
+                supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
+                
+                # 미인증 계정 삭제
+                delete_result = supabase.table("user").delete().eq("id", user_id).execute()
+                
+                if delete_result.data:
+                    deleted_count += 1
+                    logger.info(f"Deleted expired unverified account: {username} ({email}) - created: {created_at}")
+                else:
+                    failed_count += 1
+                    logger.warning(f"Failed to delete expired account: {username} ({email})")
+                    
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"Error deleting expired account {user.get('username', 'unknown')}: {str(e)}")
+        
+        result_message = f"Cleanup completed: {deleted_count} accounts deleted"
+        if failed_count > 0:
+            result_message += f", {failed_count} failed"
+        
+        logger.info(result_message)
+        return {
+            "deleted_count": deleted_count,
+            "failed_count": failed_count,
+            "message": result_message
+        }
+        
+    except Exception as e:
+        logger.error(f"Critical error in cleanup_unverified_accounts: {str(e)}")
+        return {"error": str(e), "deleted_count": 0}
+
+def cleanup_expired_verification_tokens():
+    """
+    만료된 이메일 인증 토큰들을 정리하는 함수
+    - EMAIL_VERIFICATION_EXPIRE_HOURS 시간이 지난 토큰 삭제
+    """
+    try:
+        # 만료된 토큰 삭제 (expires_at 기준)
+        current_time = datetime.utcnow().isoformat()
+        
+        # 만료된 토큰 조회 후 삭제
+        expired_tokens_result = supabase.table("email_verification_token").select("id", "user_id", "expires_at").lt("expires_at", current_time).execute()
+        
+        if not expired_tokens_result.data:
+            logger.info("No expired verification tokens found for cleanup")
+            return {"deleted_count": 0}
+        
+        deleted_count = 0
+        for token in expired_tokens_result.data:
+            try:
+                supabase.table("email_verification_token").delete().eq("id", token["id"]).execute()
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"Failed to delete expired token {token['id']}: {str(e)}")
+        
+        logger.info(f"Cleaned up {deleted_count} expired verification tokens")
+        return {"deleted_count": deleted_count}
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up expired tokens: {str(e)}")
+        return {"error": str(e), "deleted_count": 0}
+
+# 백그라운드 정리 작업 스케줄러
+def start_cleanup_scheduler():
+    """
+    백그라운드에서 주기적으로 정리 작업을 실행하는 스케줄러
+    """
+    def run_cleanup():
+        while True:
+            try:
+                logger.info("Starting scheduled cleanup of unverified accounts and expired tokens")
+                
+                # 미인증 계정 정리
+                account_cleanup_result = cleanup_unverified_accounts()
+                
+                # 만료된 토큰 정리
+                token_cleanup_result = cleanup_expired_verification_tokens()
+                
+                logger.info(f"Scheduled cleanup completed - Accounts: {account_cleanup_result.get('deleted_count', 0)}, Tokens: {token_cleanup_result.get('deleted_count', 0)}")
+                
+            except Exception as e:
+                logger.error(f"Error in scheduled cleanup: {str(e)}")
+            
+            # CLEANUP_SCHEDULE_HOURS 시간 대기
+            time.sleep(CLEANUP_SCHEDULE_HOURS * 3600)
+    
+    # 백그라운드 스레드로 실행
+    cleanup_thread = threading.Thread(target=run_cleanup, daemon=True)
+    cleanup_thread.start()
+    logger.info(f"Cleanup scheduler started - running every {CLEANUP_SCHEDULE_HOURS} hours, TTL: {UNVERIFIED_ACCOUNT_TTL_HOURS} hours")
 
 def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None):
     """
@@ -397,11 +525,11 @@ def signup(user: UserCreate):
     - 인증 완료 전까지 로그인 불가
     """
     try:
-        # 1. 통합된 중복 체크 및 미인증 계정 정리
-        # 사용자명과 이메일 모두 한번에 체크하여 race condition 방지
+        # 1. 통합된 중복 체크 및 미인증 계정 처리
         existing_users_result = supabase.table("user").select("*").or_(f"username.eq.{user.username},email.eq.{user.email}").execute()
         
-        users_to_delete = []
+        # 기존 계정 분석
+        existing_unverified_user = None
         for existing_user in existing_users_result.data:
             if existing_user.get("email_verified"):
                 # 인증된 계정이면 중복 에러
@@ -410,62 +538,85 @@ def signup(user: UserCreate):
                 if existing_user["email"] == user.email:
                     raise HTTPException(status_code=400, detail="Email already registered")
             else:
-                # 미인증 계정이면 삭제 대상으로 추가
-                users_to_delete.append(existing_user["id"])
-                logger.info(f"Found unverified account to delete: {existing_user['username']} ({existing_user['email']})")
+                # 정확히 같은 사용자명과 이메일을 가진 미인증 계정이 있는 경우
+                if existing_user["username"] == user.username and existing_user["email"] == user.email:
+                    existing_unverified_user = existing_user
+                    logger.info(f"Found exact matching unverified account: {user.username} ({user.email})")
+                    break
+                else:
+                    # 다른 미인증 계정들은 삭제
+                    try:
+                        supabase.table("email_verification_token").delete().eq("user_id", existing_user["id"]).execute()
+                        supabase.table("user").delete().eq("id", existing_user["id"]).execute()
+                        logger.info(f"Deleted unverified account: {existing_user['username']} ({existing_user['email']})")
+                    except Exception as delete_error:
+                        logger.warning(f"Failed to delete unverified account {existing_user['id']}: {str(delete_error)}")
         
-        # 2. 미인증 계정들 일괄 삭제
-        for user_id in users_to_delete:
+        # 2. 기존 미인증 계정이 있다면 인증 코드만 재발송
+        if existing_unverified_user:
+            # 패스워드 확인 (보안을 위해)
+            if not verify_password(user.password, existing_unverified_user["password_hash"]):
+                raise HTTPException(status_code=400, detail="Password mismatch for existing account")
+            
+            user_id = existing_unverified_user["id"]
+            logger.info(f"Resending verification code for existing unverified account: {user.username}")
+            
             try:
-                supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
-                supabase.table("user").delete().eq("id", user_id).execute()
-                logger.info(f"Deleted unverified account with ID: {user_id}")
-            except Exception as delete_error:
-                logger.warning(f"Failed to delete unverified account {user_id}: {str(delete_error)}")
+                code = create_email_verification_code(user_id)
+                if send_verification_code_email(user.email, user.username, code):
+                    return {
+                        "message": "Verification code resent. Please check your email for verification code.",
+                        "email": user.email,
+                        "user_id": user_id
+                    }
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to send verification email")
+            except Exception as e:
+                logger.error(f"Failed to resend verification code: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to send verification code")
         
-        # 3. 패스워드 해싱
+        # 3. 새 계정 생성
         hashed_password = get_password_hash(user.password)
         created_at = datetime.utcnow().isoformat()
         
-        # 4. 새 계정 생성 (고유 제약 조건 위반 방지를 위한 재시도 로직)
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                insert_result = supabase.table("user").insert({
-                    "username": user.username,
-                    "email": user.email,
-                    "password_hash": hashed_password,
-                    "created_at": created_at,
-                    "role": "user",
-                    "email_verified": False  # 이메일 인증 필수
-                }).execute()
+        try:
+            insert_result = supabase.table("user").insert({
+                "username": user.username,
+                "email": user.email,
+                "password_hash": hashed_password,
+                "created_at": created_at,
+                "role": "user",
+                "email_verified": False  # 이메일 인증 필수
+            }).execute()
+            
+            if not insert_result.data:
+                raise HTTPException(status_code=500, detail="Failed to create user")
                 
-                if insert_result.data:
-                    break
-                else:
-                    raise Exception("No data returned from insert")
-                    
-            except Exception as insert_error:
-                if attempt == max_retries - 1:
-                    # 마지막 시도에서도 실패하면 에러 발생
-                    logger.error(f"Failed to create user after {max_retries} attempts: {str(insert_error)}")
-                    if "duplicate key" in str(insert_error).lower():
-                        # 중복 키 에러인 경우 더 구체적인 메시지
-                        if "username" in str(insert_error).lower():
-                            raise HTTPException(status_code=400, detail="Username already exists")
-                        elif "email" in str(insert_error).lower():
-                            raise HTTPException(status_code=400, detail="Email already exists")
-                        else:
-                            raise HTTPException(status_code=400, detail="User already exists")
-                    else:
-                        raise HTTPException(status_code=500, detail="Failed to create user")
-                else:
-                    # 재시도 전에 잠시 대기
-                    import time
-                    time.sleep(0.1)
-                    logger.warning(f"User creation attempt {attempt + 1} failed, retrying: {str(insert_error)}")
+        except Exception as insert_error:
+            logger.error(f"Failed to create user: {str(insert_error)}")
+            if "duplicate key" in str(insert_error).lower():
+                # 중복 키 에러가 발생하면 다시 한 번 미인증 계정 확인
+                retry_result = supabase.table("user").select("*").eq("username", user.username).eq("email", user.email).execute()
+                if retry_result.data and not retry_result.data[0].get("email_verified"):
+                    # 미인증 계정이 존재하면 인증 코드 재발송
+                    existing_user = retry_result.data[0]
+                    if verify_password(user.password, existing_user["password_hash"]):
+                        user_id = existing_user["id"]
+                        code = create_email_verification_code(user_id)
+                        if send_verification_code_email(user.email, user.username, code):
+                            return {
+                                "message": "Verification code resent. Please check your email for verification code.",
+                                "email": user.email,
+                                "user_id": user_id
+                            }
+                # 그 외의 경우 일반적인 중복 에러
+                if "username" in str(insert_error).lower():
+                    raise HTTPException(status_code=400, detail="Username already registered")
+                elif "email" in str(insert_error).lower():
+                    raise HTTPException(status_code=400, detail="Email already registered")
+            raise HTTPException(status_code=500, detail="Failed to create user")
         
-        # 5. 인증 코드 생성 및 발송
+        # 4. 인증 코드 생성 및 발송
         user_id = None
         try:
             user_id = insert_result.data[0]["id"]
@@ -1029,4 +1180,47 @@ def get_email_verification_status(current_user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get verification status: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to get verification status: {str(e)}")
+
+# TTL 관련 관리자 API들
+@router.post("/admin/cleanup-unverified-accounts")
+def manual_cleanup_unverified_accounts(current_user=Depends(admin_required)):
+    """
+    관리자 전용: 미인증 계정 수동 정리
+    - TTL이 만료된 미인증 계정들을 즉시 삭제
+    """
+    try:
+        result = cleanup_unverified_accounts()
+        return {
+            "message": "Manual cleanup executed successfully",
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to execute cleanup: {str(e)}")
+
+@router.get("/admin/unverified-accounts-status")
+def get_unverified_accounts_status(current_user=Depends(admin_required)):
+    """
+    관리자 전용: 미인증 계정 현황 조회
+    - 전체 미인증 계정 수
+    - TTL 만료 예정 계정 수
+    """
+    try:
+        # 전체 미인증 계정 수
+        total_unverified = supabase.table("user").select("id", count="exact").eq("email_verified", False).execute()
+        
+        # TTL 만료 예정 계정 수 (현재 시간 기준)
+        ttl_threshold = datetime.utcnow() - timedelta(hours=UNVERIFIED_ACCOUNT_TTL_HOURS)
+        ttl_threshold_iso = ttl_threshold.isoformat()
+        
+        expired_unverified = supabase.table("user").select("id", count="exact").eq("email_verified", False).lt("created_at", ttl_threshold_iso).execute()
+        
+        return {
+            "total_unverified_accounts": total_unverified.count,
+            "expired_accounts_ready_for_cleanup": expired_unverified.count,
+            "ttl_hours": UNVERIFIED_ACCOUNT_TTL_HOURS,
+            "cleanup_schedule_hours": CLEANUP_SCHEDULE_HOURS
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get unverified accounts status: {str(e)}") 

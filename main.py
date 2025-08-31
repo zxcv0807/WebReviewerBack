@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from services.auth import router as auth_router
+from services.auth import router as auth_router, start_cleanup_scheduler
 from services.post import router as post_router
 from services.image import router as image_router
 from services.review import router as review_router
@@ -50,6 +50,15 @@ app.include_router(review_router, prefix="/api", tags=["Reviews"])  # 웹사이�
 app.include_router(phishing_router, prefix="/api", tags=["Phishing Sites"])  # 피싱 사이트 신고 및 관리
 app.include_router(image_router, tags=["File Upload"])  # 이미지 업로드/조회
 # uploads 폴더는 Supabase Storage로 대체되어 제거됨
+
+# TTL 기반 자동 정리 스케줄러 시작
+@app.on_event("startup")
+async def startup_event():
+    """
+    애플리케이션 시작 시 실행되는 이벤트
+    - TTL 기반 미인증 계정 자동 정리 스케줄러 시작
+    """
+    start_cleanup_scheduler()
 
 # 기본 라우트
 @app.get("/", tags=["Root"])
