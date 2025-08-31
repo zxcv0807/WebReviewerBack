@@ -732,21 +732,28 @@ def login(user: UserLogin, response: Response):
         
         # 3. 이메일 인증 상태 확인
         if not user_row.get("email_verified"):
-            # 미인증 사용자에게 인증 코드 자동 재발송
+            # 미인증 사용자에게 인증 코드 자동 발송
+            verification_code_sent = False
             try:
                 code = create_email_verification_code(user_row["id"])
-                send_verification_code_email(user_row["email"], user_row["username"], code)
-                logger.info(f"Verification code resent to unverified user: {user_row['email']}")
+                if send_verification_code_email(user_row["email"], user_row["username"], code):
+                    verification_code_sent = True
+                    logger.info(f"Verification code automatically sent to unverified user: {user_row['email']}")
+                else:
+                    logger.warning(f"Failed to send verification code to: {user_row['email']}")
             except Exception as e:
-                logger.error(f"Failed to resend verification code: {str(e)}")
+                logger.error(f"Failed to send verification code during login: {str(e)}")
             
-            # 사용자에게 친화적인 응답 제공
+            # 사용자에게 일관된 응답 제공
             raise HTTPException(
                 status_code=403, 
                 detail={
                     "error": "email_verification_required",
-                    "message": "Email verification required to login.",
-                    "action": "verification_code_sent",
+                    "message": "Email verification required to login." + (
+                        " A verification code has been sent to your email." if verification_code_sent 
+                        else " Please use the 'Email Verification' button to receive a verification code."
+                    ),
+                    "action": "verification_code_sent" if verification_code_sent else "verification_required",
                     "email": user_row["email"],
                     "user_id": user_row["id"]
                 }
@@ -1126,69 +1133,52 @@ def delete_account(current_user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
 
-# JWT 토큰 없이 인증 코드 재발송 (이메일 + 패스워드 인증)
+# 기존 인증 코드 재발송 엔드포인트 (Deprecated - /send-verification-email 사용 권장)
 @router.post("/resend-verification-code")
 def resend_verification_code(user: UserLogin):
     """
-    JWT 토큰 없이 인증 코드 재발송
-    - 이메일과 패스워드로 본인 확인
-    - 미인증 계정에게만 인증 코드 재발송
+    Deprecated: Use /send-verification-email instead
+    
+    이 엔드포인트는 /send-verification-email과 동일한 기능을 제공합니다.
+    일관성을 위해 /send-verification-email 사용을 권장합니다.
+    """
+    # 동일한 로직을 /send-verification-email로 위임
+    return send_verification_email_api(user)
+
+# 이메일 인증 메일 발송 (이메일+패스워드 인증으로 통일)
+@router.post("/send-verification-email")
+def send_verification_email_api(user_login: UserLogin):
+    """
+    이메일 인증 코드 발송 - 이메일+패스워드로 본인 확인
+    - 미인증 사용자가 JWT 토큰 없이도 사용 가능
+    - 신규 회원가입과 동일한 플로우 제공
     """
     try:
-        # 1. 사용자 확인
-        user_result = supabase.table("user").select("*").eq("email", user.email).execute()
+        # 사용자 확인
+        user_result = supabase.table("user").select("*").eq("email", user_login.email).execute()
         if not user_result.data:
             raise HTTPException(status_code=404, detail="User not found")
         
         user_row = user_result.data[0]
         
-        # 2. 패스워드 검증
-        if not verify_password(user.password, user_row["password_hash"]):
+        # 패스워드 검증
+        if not verify_password(user_login.password, user_row["password_hash"]):
             raise HTTPException(status_code=401, detail="Incorrect password")
         
-        # 3. 이미 인증된 계정 확인
+        # 이미 인증된 경우
         if user_row.get("email_verified"):
             raise HTTPException(status_code=400, detail="Email is already verified")
         
-        # 4. 인증 코드 생성 및 발송
-        code = create_email_verification_code(user_row["id"])
-        if send_verification_code_email(user_row["email"], user_row["username"], code):
-            return {
-                "message": "Verification code sent successfully",
-                "email": user_row["email"],
-                "user_id": user_row["id"]
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to send verification code")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to resend verification code: {str(e)}")
-
-# 이메일 인증 메일 발송 (JWT 토큰 필요)
-@router.post("/send-verification-email")
-def send_verification_email_api(current_user=Depends(get_current_user)):
-    try:
-        user_id = current_user["id"]
-        
-        # 사용자 정보 조회
-        user_result = supabase.table("user").select("email", "username", "email_verified").eq("id", user_id).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        user_data = user_result.data[0]
-        
-        # 이미 인증된 경우
-        if user_data.get("email_verified"):
-            raise HTTPException(status_code=400, detail="Email is already verified")
-        
-        # 인증 코드 생성
+        # 인증 코드 생성 및 발송
+        user_id = user_row["id"]
         code = create_email_verification_code(user_id)
         
-        # 인증 코드 이메일 발송
-        if send_verification_code_email(user_data["email"], user_data["username"], code):
-            return {"message": "Verification code email sent successfully"}
+        if send_verification_code_email(user_row["email"], user_row["username"], code):
+            return {
+                "message": "Verification code email sent successfully",
+                "email": user_row["email"],
+                "user_id": user_id
+            }
         else:
             raise HTTPException(status_code=500, detail="Failed to send verification code email")
         
