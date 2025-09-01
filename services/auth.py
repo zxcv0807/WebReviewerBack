@@ -189,10 +189,13 @@ def send_verification_code_email(email: str, username: str, code: str):
         msg['Subject'] = "이메일 주소 인증 코드"
         
         # 반송 메일 차단을 위한 헤더 설정
-        msg['Return-Path'] = "<>"  # 빈 Return-Path로 반송 메일 차단
-        msg['Errors-To'] = "<>"   # 에러 메일 차단
+        msg['Return-Path'] = ""  # 빈 Return-Path로 반송 메일 차단
+        msg['Errors-To'] = ""   # 에러 메일 차단  
         msg['X-No-Bounce'] = "1"  # 반송 금지 플래그
         msg['Precedence'] = "bulk"  # 대량 메일로 분류하여 반송 최소화
+        msg['Auto-Submitted'] = "auto-generated"  # 자동생성 메일 표시
+        msg['X-Auto-Response-Suppress'] = "All"  # 모든 자동응답 억제
+        msg['List-Unsubscribe'] = "<mailto:noreply@example.com>"  # 수신거부 처리
         
         body = f"""
         안녕하세요 {username}님,
@@ -215,9 +218,10 @@ def send_verification_code_email(email: str, username: str, code: str):
         server.starttls()
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
         
-        # 반송 메일을 생성하지 않도록 빈 Return-Path 설정
+        # 반송 메일을 생성하지 않도록 설정
         text = msg.as_string()
-        server.sendmail(FROM_EMAIL, [email], text, mail_options=['NOTIFY=NEVER'])
+        # 빈 Return-Path로 반송 메일 완전 차단
+        server.sendmail("", [email], text)
         server.quit()
         
         logger.info(f"Verification code email sent to {email} (bounce suppressed)")
@@ -251,10 +255,13 @@ def send_password_reset_email(email: str, username: str, code: str):
         msg['Subject'] = "비밀번호 재설정 인증 코드"
         
         # 반송 메일 차단을 위한 헤더 설정
-        msg['Return-Path'] = "<>"  # 빈 Return-Path로 반송 메일 차단
-        msg['Errors-To'] = "<>"   # 에러 메일 차단
+        msg['Return-Path'] = ""  # 빈 Return-Path로 반송 메일 차단
+        msg['Errors-To'] = ""   # 에러 메일 차단  
         msg['X-No-Bounce'] = "1"  # 반송 금지 플래그
         msg['Precedence'] = "bulk"  # 대량 메일로 분류하여 반송 최소화
+        msg['Auto-Submitted'] = "auto-generated"  # 자동생성 메일 표시
+        msg['X-Auto-Response-Suppress'] = "All"  # 모든 자동응답 억제
+        msg['List-Unsubscribe'] = "<mailto:noreply@example.com>"  # 수신거부 처리
         
         body = f"""
         안녕하세요 {username}님,
@@ -278,9 +285,10 @@ def send_password_reset_email(email: str, username: str, code: str):
         server.starttls()
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
         
-        # 반송 메일을 생성하지 않도록 빈 Return-Path 설정
+        # 반송 메일을 생성하지 않도록 설정
         text = msg.as_string()
-        server.sendmail(FROM_EMAIL, [email], text, mail_options=['NOTIFY=NEVER'])
+        # 빈 Return-Path로 반송 메일 완전 차단
+        server.sendmail("", [email], text)
         server.quit()
         
         logger.info(f"Password reset email sent to {email} (bounce suppressed)")
