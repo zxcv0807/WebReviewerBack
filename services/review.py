@@ -48,6 +48,7 @@ class ReviewResponse(BaseModel):
     like_count: int = 0
     dislike_count: int = 0
     user_id: Optional[int]
+    user_name: str = "알수없음"
 
 class CommentCreate(BaseModel):
     content: str = Field(..., description="댓글 내용")
@@ -61,6 +62,7 @@ class CommentResponse(BaseModel):
     content: str
     created_at: str
     user_id: Optional[int]
+    user_name: str = "알수없음"
 
 class ReviewWithCommentsResponse(BaseModel):
     id: int
@@ -76,6 +78,7 @@ class ReviewWithCommentsResponse(BaseModel):
     like_count: int = 0
     dislike_count: int = 0
     user_id: Optional[int]
+    user_name: str = "알수없음"
     comments: List[CommentResponse]
 
 # API Endpoints
@@ -98,7 +101,13 @@ def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
     }).execute()
     review_id = review_result.data[0]["id"]
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
-    return ReviewResponse(**review_row)
+    
+    user_name = "알수없음"
+    if review_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", review_row["user_id"]).single().execute().data
+        user_name = user_row["username"] if user_row else "알수없음"
+    
+    return ReviewResponse(**review_row, user_name=user_name)
 
 @router.get("/reviews", response_model=PaginatedResponse[ReviewWithCommentsResponse])
 def get_reviews(
@@ -118,12 +127,22 @@ def get_reviews(
     else:
         comments = []
     
-    reviews_dict = {r["id"]: ReviewWithCommentsResponse(**r, comments=[]) for r in reviews}
+    reviews_dict = {}
+    for r in reviews:
+        user_name = "알수없음"
+        if r.get("user_id"):
+            user_row = supabase.table("user").select("username").eq("id", r["user_id"]).single().execute().data
+            user_name = user_row["username"] if user_row else "알수없음"
+        reviews_dict[r["id"]] = ReviewWithCommentsResponse(**r, user_name=user_name, comments=[])
     
     # 댓글 추가
     for c in comments:
         if c["review_id"] in reviews_dict:
-            reviews_dict[c["review_id"]].comments.append(CommentResponse(**c))
+            comment_user_name = "알수없음"
+            if c.get("user_id"):
+                user_row = supabase.table("user").select("username").eq("id", c["user_id"]).single().execute().data
+                comment_user_name = user_row["username"] if user_row else "알수없음"
+            reviews_dict[c["review_id"]].comments.append(CommentResponse(**c, user_name=comment_user_name))
     
     pagination_info = create_pagination_info(page, limit, total_count)
     return PaginatedResponse(data=list(reviews_dict.values()), pagination=pagination_info)
@@ -175,7 +194,9 @@ def create_comment(review_id: int, comment: CommentCreate, current_user=Depends(
     }).execute()
     comment_id = comment_result.data[0]["id"]
     comment_row = supabase.table("review_comment").select("*").eq("id", comment_id).single().execute().data
-    return CommentResponse(**comment_row)
+    
+    comment_user_name = current_user["username"]
+    return CommentResponse(**comment_row, user_name=comment_user_name)
 
 @router.put("/comments/{comment_id}", response_model=CommentResponse)
 def update_comment(comment_id: int, comment_update: CommentUpdate, current_user=Depends(get_current_user)):
@@ -195,7 +216,9 @@ def update_comment(comment_id: int, comment_update: CommentUpdate, current_user=
         supabase.table("review_comment").update(update_fields).eq("id", comment_id).execute()
     
     comment_row = supabase.table("review_comment").select("*").eq("id", comment_id).single().execute().data
-    return CommentResponse(**comment_row)
+    
+    comment_user_name = current_user["username"]
+    return CommentResponse(**comment_row, user_name=comment_user_name)
 
 @router.delete("/comments/{comment_id}")
 def delete_comment(comment_id: int, current_user=Depends(get_current_user)):
@@ -339,7 +362,13 @@ def update_review(review_id: int, review_update: ReviewUpdate, current_user=Depe
         update_fields["updated_at"] = datetime.utcnow().isoformat()
         supabase.table("review").update(update_fields).eq("id", review_id).execute()
     review_row = supabase.table("review").select("*").eq("id", review_id).single().execute().data
-    return ReviewResponse(**review_row)
+    
+    user_name = "알수없음"
+    if review_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", review_row["user_id"]).single().execute().data
+        user_name = user_row["username"] if user_row else "알수없음"
+    
+    return ReviewResponse(**review_row, user_name=user_name)
 
 @router.delete("/reviews/{review_id}")
 def delete_review(review_id: int, current_user=Depends(get_current_user)):

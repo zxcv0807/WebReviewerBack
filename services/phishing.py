@@ -33,6 +33,7 @@ class PhishingSiteResponse(BaseModel):
     like_count: int = 0
     dislike_count: int = 0
     user_id: Optional[int]
+    user_name: str = "알수없음"
 
 class VoteCreate(BaseModel):
     vote_type: str = Field(..., description="추천/비추천 ('like' 또는 'dislike')")
@@ -70,6 +71,7 @@ class PhishingSiteWithCommentsResponse(BaseModel):
     like_count: int = 0
     dislike_count: int = 0
     user_id: Optional[int]
+    user_name: str = "알수없음"
     comments: List[CommentResponse]
 
 # API Endpoints
@@ -90,7 +92,13 @@ def create_phishing_site(phishing_site: PhishingSiteCreate, current_user=Depends
     }).execute()
     phishing_site_id = result.data[0]["id"]
     site_row = supabase.table("phishing_site").select("*").eq("id", phishing_site_id).single().execute().data
-    return PhishingSiteResponse(**site_row)
+    
+    user_name = "알수없음"
+    if site_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", site_row["user_id"]).single().execute().data
+        user_name = user_row["username"] if user_row else "알수없음"
+    
+    return PhishingSiteResponse(**site_row, user_name=user_name)
 
 @router.get("/phishing-sites", response_model=PaginatedResponse[PhishingSiteResponse])
 def get_phishing_sites(
@@ -106,7 +114,13 @@ def get_phishing_sites(
         total_count = len(supabase.table("phishing_site").select("id").execute().data)
         sites = supabase.table("phishing_site").select("*").order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     
-    sites_data = [PhishingSiteResponse(**site) for site in sites]
+    sites_data = []
+    for site in sites:
+        user_name = "알수없음"
+        if site.get("user_id"):
+            user_row = supabase.table("user").select("username").eq("id", site["user_id"]).single().execute().data
+            user_name = user_row["username"] if user_row else "알수없음"
+        sites_data.append(PhishingSiteResponse(**site, user_name=user_name))
     pagination_info = create_pagination_info(page, limit, total_count)
     return PaginatedResponse(data=sites_data, pagination=pagination_info)
 
@@ -125,7 +139,12 @@ def get_phishing_site(site_id: int):
     # 업데이트된 view_count를 반영
     site_row["view_count"] = current_view_count + 1
     
-    return PhishingSiteResponse(**site_row)
+    user_name = "알수없음"
+    if site_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", site_row["user_id"]).single().execute().data
+        user_name = user_row["username"] if user_row else "알수없음"
+    
+    return PhishingSiteResponse(**site_row, user_name=user_name)
 
 @router.put("/phishing-sites/{site_id}", response_model=PhishingSiteResponse)
 def update_phishing_site(site_id: int, site_update: PhishingSiteUpdate):
@@ -152,7 +171,13 @@ def update_phishing_site(site_id: int, site_update: PhishingSiteUpdate):
         site_row = supabase.table("phishing_site").select("*").eq("id", site_id).single().execute().data
         if not site_row:
             raise HTTPException(status_code=404, detail="Phishing site not found after update")
-        return PhishingSiteResponse(**site_row)
+        
+        user_name = "알수없음"
+        if site_row.get("user_id"):
+            user_row = supabase.table("user").select("username").eq("id", site_row["user_id"]).single().execute().data
+            user_name = user_row["username"] if user_row else "알수없음"
+        
+        return PhishingSiteResponse(**site_row, user_name=user_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update phishing site: {str(e)}")
 
@@ -424,6 +449,11 @@ def get_phishing_site_with_comments(site_id: int):
             updated_at=comment_row["updated_at"]
         ))
     
+    site_user_name = "알수없음"
+    if site_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", site_row["user_id"]).single().execute().data
+        site_user_name = user_row["username"] if user_row else "알수없음"
+    
     return PhishingSiteWithCommentsResponse(
         id=site_row["id"],
         url=site_row["url"],
@@ -436,6 +466,7 @@ def get_phishing_site_with_comments(site_id: int):
         like_count=site_row.get("like_count", 0),
         dislike_count=site_row.get("dislike_count", 0),
         user_id=site_row.get("user_id"),
+        user_name=site_user_name,
         comments=comments
     )
 

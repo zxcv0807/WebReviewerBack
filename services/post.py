@@ -143,9 +143,11 @@ def get_posts(
     for post_row in post_rows:
         tags = [row["name"] for row in supabase.table("tag").select("name").eq("post_id", post_row["id"]).execute().data]
         user_name = post_row.get("user_name")
-        if not user_name:
+        if not user_name and post_row.get("user_id"):
             user_row = supabase.table("user").select("username").eq("id", post_row["user_id"]).single().execute().data
             user_name = user_row["username"] if user_row else "알수없음"
+        elif not user_name:
+            user_name = "알수없음"
         posts.append(PostResponse(
             id=post_row["id"],
             title=post_row["title"],
@@ -180,6 +182,13 @@ def get_post(post_id: int):
     post_row["view_count"] = current_view_count + 1
     
     tags = [row["name"] for row in supabase.table("tag").select("name").eq("post_id", post_id).execute().data]
+    user_name = post_row.get("user_name")
+    if not user_name and post_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", post_row["user_id"]).single().execute().data
+        user_name = user_row["username"] if user_row else "알수없음"
+    elif not user_name:
+        user_name = "알수없음"
+        
     return PostResponse(
         id=post_row["id"],
         title=post_row["title"],
@@ -189,7 +198,7 @@ def get_post(post_id: int):
         created_at=post_row["created_at"],
         updated_at=post_row["updated_at"],
         user_id=post_row["user_id"],
-        user_name=post_row["user_name"],
+        user_name=user_name,
         view_count=post_row["view_count"],
         like_count=post_row.get("like_count", 0),
         dislike_count=post_row.get("dislike_count", 0)
@@ -488,6 +497,13 @@ def get_post_with_comments(post_id: int):
             updated_at=comment_row["updated_at"]
         ))
     
+    post_user_name = post_row.get("user_name")
+    if not post_user_name and post_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", post_row["user_id"]).single().execute().data
+        post_user_name = user_row["username"] if user_row else "알수없음"
+    elif not post_user_name:
+        post_user_name = "알수없음"
+        
     return PostWithCommentsResponse(
         id=post_row["id"],
         title=post_row["title"],
@@ -497,7 +513,7 @@ def get_post_with_comments(post_id: int):
         created_at=post_row["created_at"],
         updated_at=post_row["updated_at"],
         user_id=post_row["user_id"],
-        user_name=post_row["user_name"],
+        user_name=post_user_name,
         view_count=post_row["view_count"],
         like_count=post_row.get("like_count", 0),
         dislike_count=post_row.get("dislike_count", 0),

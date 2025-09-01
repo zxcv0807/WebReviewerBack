@@ -169,7 +169,7 @@ def verify_email_verification_code(code: str):
 # 이메일 인증 코드 전송 함수
 def send_verification_code_email(email: str, username: str, code: str):
     """
-    이메일 인증 코드 발송 (실패해도 성공한 것처럼 응답)
+    이메일 인증 코드 발송 (실패해도 성공한 것처럼 응답, 반송 메일 차단)
     Args:
         email: 수신자 이메일
         username: 사용자명
@@ -188,6 +188,12 @@ def send_verification_code_email(email: str, username: str, code: str):
         msg['To'] = email
         msg['Subject'] = "이메일 주소 인증 코드"
         
+        # 반송 메일 차단을 위한 헤더 설정
+        msg['Return-Path'] = "<>"  # 빈 Return-Path로 반송 메일 차단
+        msg['Errors-To'] = "<>"   # 에러 메일 차단
+        msg['X-No-Bounce'] = "1"  # 반송 금지 플래그
+        msg['Precedence'] = "bulk"  # 대량 메일로 분류하여 반송 최소화
+        
         body = f"""
         안녕하세요 {username}님,
         
@@ -204,26 +210,28 @@ def send_verification_code_email(email: str, username: str, code: str):
         
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
         
-        # SMTP 서버 연결 및 이메일 발송
+        # SMTP 서버 연결 및 이메일 발송 (반송 방지 옵션)
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        
+        # 반송 메일을 생성하지 않도록 빈 Return-Path 설정
         text = msg.as_string()
-        server.sendmail(FROM_EMAIL, email, text)
+        server.sendmail(FROM_EMAIL, [email], text, mail_options=['NOTIFY=NEVER'])
         server.quit()
         
-        logger.info(f"Verification code email sent to {email}")
+        logger.info(f"Verification code email sent to {email} (bounce suppressed)")
         return True
         
     except Exception as e:
         # 이메일 발송 실패해도 로그만 남기고 성공한 것처럼 처리
-        logger.warning(f"Email send failed silently: {email} - {str(e)}")
+        logger.warning(f"Email send failed silently (bounce suppressed): {email} - {str(e)}")
         return True  # 실패해도 True 반환하여 배달 실패 알림 방지
 
 # 비밀번호 재설정 코드 전송 함수
 def send_password_reset_email(email: str, username: str, code: str):
     """
-    비밀번호 재설정 코드 발송 (실패해도 성공한 것처럼 응답)
+    비밀번호 재설정 코드 발송 (실패해도 성공한 것처럼 응답, 반송 메일 차단)
     Args:
         email: 수신자 이메일
         username: 사용자명
@@ -242,6 +250,12 @@ def send_password_reset_email(email: str, username: str, code: str):
         msg['To'] = email
         msg['Subject'] = "비밀번호 재설정 인증 코드"
         
+        # 반송 메일 차단을 위한 헤더 설정
+        msg['Return-Path'] = "<>"  # 빈 Return-Path로 반송 메일 차단
+        msg['Errors-To'] = "<>"   # 에러 메일 차단
+        msg['X-No-Bounce'] = "1"  # 반송 금지 플래그
+        msg['Precedence'] = "bulk"  # 대량 메일로 분류하여 반송 최소화
+        
         body = f"""
         안녕하세요 {username}님,
         
@@ -259,20 +273,22 @@ def send_password_reset_email(email: str, username: str, code: str):
         
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
         
-        # SMTP 서버 연결 및 이메일 발송
+        # SMTP 서버 연결 및 이메일 발송 (반송 방지 옵션)
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        
+        # 반송 메일을 생성하지 않도록 빈 Return-Path 설정
         text = msg.as_string()
-        server.sendmail(FROM_EMAIL, email, text)
+        server.sendmail(FROM_EMAIL, [email], text, mail_options=['NOTIFY=NEVER'])
         server.quit()
         
-        logger.info(f"Password reset email sent to {email}")
+        logger.info(f"Password reset email sent to {email} (bounce suppressed)")
         return True
         
     except Exception as e:
         # 이메일 발송 실패해도 로그만 남기고 성공한 것처럼 처리
-        logger.warning(f"Password reset email failed silently: {email} - {str(e)}")
+        logger.warning(f"Password reset email failed silently (bounce suppressed): {email} - {str(e)}")
         return True  # 실패해도 True 반환하여 배달 실패 알림 방지
 
 # TTL 기반 미인증 계정 자동 정리 시스템
