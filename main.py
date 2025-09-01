@@ -7,6 +7,7 @@ from services.post import router as post_router
 from services.image import router as image_router
 from services.review import router as review_router
 from services.phishing import router as phishing_router
+from services.message import router as message_router
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from dotenv import load_dotenv
@@ -49,6 +50,7 @@ app.include_router(post_router, prefix="/posts", tags=["Posts"])  # 자유게시
 app.include_router(review_router, prefix="/api", tags=["Reviews"])  # 웹사이트 리뷰 (별점/댓글/평균 계산)
 app.include_router(phishing_router, prefix="/api", tags=["Phishing Sites"])  # 피싱 사이트 신고 및 관리
 app.include_router(image_router, tags=["File Upload"])  # 이미지 업로드/조회
+app.include_router(message_router, prefix="/messages", tags=["Messages & Memos"])  # 개인 쪽지 및 사용자 메모
 # uploads 폴더는 Supabase Storage로 대체되어 제거됨
 
 # TTL 기반 자동 정리 스케줄러 시작
