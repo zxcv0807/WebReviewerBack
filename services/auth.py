@@ -217,6 +217,58 @@ def send_verification_code_email(email: str, username: str, code: str):
         logger.error(f"Failed to send verification code email: {str(e)}")
         return False
 
+# 비밀번호 재설정 코드 전송 함수
+def send_password_reset_email(email: str, username: str, code: str):
+    """
+    비밀번호 재설정 코드 발송
+    Args:
+        email: 수신자 이메일
+        username: 사용자명
+        code: 6자리 재설정 코드
+    """
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        logger.warning("SMTP credentials not configured. Email will not be sent.")
+        return False
+    
+    try:
+        # 이메일 내용 작성
+        msg = MIMEMultipart()
+        msg['From'] = FROM_EMAIL
+        msg['To'] = email
+        msg['Subject'] = "비밀번호 재설정 인증 코드"
+        
+        body = f"""
+        안녕하세요 {username}님,
+        
+        비밀번호 재설정을 요청하셨습니다.
+        아래 인증 코드를 웹사이트에 입력하여 비밀번호를 재설정해 주세요.
+        
+        인증 코드: {code}
+        
+        이 코드는 24시간 후에 만료됩니다.
+        만약 비밀번호 재설정을 요청하지 않으셨다면, 이 이메일을 무시해 주세요.
+        보안을 위해 이 코드를 다른 사람과 공유하지 마세요.
+        
+        감사합니다.
+        """
+        
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        
+        # SMTP 서버 연결 및 이메일 발송
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        text = msg.as_string()
+        server.sendmail(FROM_EMAIL, email, text)
+        server.quit()
+        
+        logger.info(f"Password reset email sent to {email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send password reset email: {str(e)}")
+        return False
+
 # TTL 기반 미인증 계정 자동 정리 시스템
 def cleanup_unverified_accounts():
     """
@@ -455,17 +507,16 @@ class GoogleCallbackRequest(BaseModel):
     state: Optional[str] = None  # CSRF 방지용 state 파라미터
 
 class UserUpdate(BaseModel):
-    """사용자 정보 수정 요청 모델"""
-    username: Optional[str] = None
-    email: Optional[EmailStr] = None
+    """사용자 정보 수정 요청 모델 (비밀번호 확인 필수)"""
+    username: str
+    current_password: str
     
     @validator('username')
     def validate_username(cls, v):
-        if v is not None:
-            if len(v) < 3 or len(v) > 20:
-                raise ValueError('사용자명은 3-20자 사이여야 합니다')
-            if not v.isalnum():
-                raise ValueError('사용자명은 영문자와 숫자만 허용됩니다')
+        if len(v) < 3 or len(v) > 20:
+            raise ValueError('사용자명은 3-20자 사이여야 합니다')
+        if not v.isalnum():
+            raise ValueError('사용자명은 영문자와 숫자만 허용됩니다')
         return v
 
 class PasswordChange(BaseModel):
@@ -490,6 +541,30 @@ class EmailVerificationCode(BaseModel):
         if not v.isalnum():
             raise ValueError('인증 코드는 숫자와 영문만 허용됩니다')
         return v.upper()  # 대문자로 변환
+
+class PasswordResetRequest(BaseModel):
+    """비밀번호 재설정 요청 모델 (이메일만 필요)"""
+    email: EmailStr
+
+class PasswordResetComplete(BaseModel):
+    """비밀번호 재설정 완료 모델 (코드 + 새 비밀번호)"""
+    email: EmailStr
+    code: str
+    new_password: str
+    
+    @validator('code')
+    def validate_code(cls, v):
+        if not v or len(v) != 6:
+            raise ValueError('인증 코드는 6자리여야 합니다')
+        if not v.isalnum():
+            raise ValueError('인증 코드는 숫자와 영문만 허용됩니다')
+        return v.upper()  # 대문자로 변환
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('새 비밀번호는 8자 이상이어야 합니다')
+        return v
 
 # Deprecated: SignupRequest 모델은 더 이상 사용하지 않음 (기존 UserCreate 사용)
 
@@ -1016,37 +1091,42 @@ def get_me(current_user=Depends(get_current_user)):
     except Exception:
         raise HTTPException(status_code=401, detail="User not found")
 
-# 사용자 정보 수정
+# 사용자 정보 수정 (사용자명만 수정 가능, 비밀번호 확인 필수)
 @router.put("/me")
 def update_me(user_update: UserUpdate, current_user=Depends(get_current_user)):
     try:
-        update_data = {}
+        # 현재 사용자 정보 조회 (비밀번호 해시 포함)
+        user_result = supabase.table("user").select("*").eq("id", current_user["id"]).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found")
         
-        # 사용자명 변경 처리
-        if user_update.username is not None:
-            # 사용자명 중복 체크 (자기 자신 제외)
-            username_result = supabase.table("user").select("id").eq("username", user_update.username).neq("id", current_user["id"]).execute()
-            if username_result.data:
-                raise HTTPException(status_code=400, detail="Username already exists")
-            update_data["username"] = user_update.username
+        user_row = user_result.data[0]
         
-        # 이메일 변경 처리  
-        if user_update.email is not None:
-            # 이메일 중복 체크 (자기 자신 제외)
-            email_result = supabase.table("user").select("id").eq("email", user_update.email).neq("id", current_user["id"]).execute()
-            if email_result.data:
-                raise HTTPException(status_code=400, detail="Email already exists")
-            update_data["email"] = user_update.email
+        # Google OAuth 전용 계정 체크 (비밀번호가 없는 경우)
+        if not user_row["password_hash"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot update username for Google OAuth account. Google OAuth users cannot modify their profile."
+            )
         
-        # 업데이트할 데이터가 없는 경우
-        if not update_data:
-            raise HTTPException(status_code=400, detail="No data to update")
+        # 현재 비밀번호 검증
+        if not verify_password(user_update.current_password, user_row["password_hash"]):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
         
-        # 사용자 정보 업데이트
-        update_result = supabase.table("user").update(update_data).eq("id", current_user["id"]).execute()
+        # 사용자명 중복 체크 (자기 자신 제외)
+        username_result = supabase.table("user").select("id").eq("username", user_update.username).neq("id", current_user["id"]).execute()
+        if username_result.data:
+            raise HTTPException(status_code=400, detail="Username already exists")
+        
+        # 사용자명이 현재와 동일한지 확인
+        if user_update.username == user_row["username"]:
+            raise HTTPException(status_code=400, detail="New username is the same as current username")
+        
+        # 사용자명 업데이트
+        update_result = supabase.table("user").update({"username": user_update.username}).eq("id", current_user["id"]).execute()
         
         if not update_result.data:
-            raise HTTPException(status_code=500, detail="Failed to update user")
+            raise HTTPException(status_code=500, detail="Failed to update username")
         
         # 업데이트된 사용자 정보 반환
         updated_user = update_result.data[0]
@@ -1055,7 +1135,7 @@ def update_me(user_update: UserUpdate, current_user=Depends(get_current_user)):
             "username": updated_user["username"],
             "email": updated_user["email"],
             "role": updated_user["role"],
-            "message": "User information updated successfully"
+            "message": "Username updated successfully"
         }
         
     except HTTPException:
@@ -1268,4 +1348,107 @@ def get_unverified_accounts_status(current_user=Depends(admin_required)):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get unverified accounts status: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to get unverified accounts status: {str(e)}")
+
+# 비밀번호 찾기 (재설정 코드 발송)
+@router.post("/forgot-password")
+def forgot_password(request: PasswordResetRequest):
+    """
+    비밀번호 찾기 - 이메일로 재설정 코드 발송
+    - 가입된 이메일인지 확인 (인증된 계정만)
+    - 비밀번호 재설정 코드 생성 및 발송
+    - Google OAuth 계정은 비밀번호 재설정 불가
+    """
+    try:
+        # 사용자 확인 (이메일 기반)
+        user_result = supabase.table("user").select("*").eq("email", request.email).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found with this email")
+        
+        user_row = user_result.data[0]
+        
+        # 이메일 인증 상태 확인
+        if not user_row.get("email_verified"):
+            raise HTTPException(status_code=400, detail="Email not verified. Please verify your email first.")
+        
+        # Google OAuth 전용 계정 체크 (비밀번호가 없는 경우)
+        if not user_row["password_hash"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot reset password for Google OAuth account. Please use Google login."
+            )
+        
+        # 비밀번호 재설정 코드 생성 (기존 email_verification_token 테이블 재사용)
+        user_id = user_row["id"]
+        try:
+            code = create_email_verification_code(user_id)  # 같은 구조 재사용
+            
+            # 비밀번호 재설정 전용 이메일 발송
+            if send_password_reset_email(request.email, user_row["username"], code):
+                return {
+                    "message": "Password reset code sent successfully. Please check your email.",
+                    "email": request.email
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Failed to send password reset email")
+                
+        except Exception as e:
+            logger.error(f"Failed to create password reset code: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to send password reset code")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in forgot_password: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process password reset request: {str(e)}")
+
+# 비밀번호 재설정 완료
+@router.post("/reset-password")
+def reset_password(request: PasswordResetComplete):
+    """
+    비밀번호 재설정 완료
+    - 이메일과 재설정 코드 검증
+    - 새 비밀번호로 업데이트
+    - Google OAuth 계정은 재설정 불가
+    """
+    try:
+        # 사용자 확인 (이메일 기반)
+        user_result = supabase.table("user").select("*").eq("email", request.email).execute()
+        if not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found with this email")
+        
+        user_row = user_result.data[0]
+        
+        # Google OAuth 전용 계정 체크
+        if not user_row["password_hash"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot reset password for Google OAuth account. Please use Google login."
+            )
+        
+        # 재설정 코드 검증
+        user_id = verify_email_verification_code(request.code)
+        if not user_id or user_id != user_row["id"]:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+        
+        # 새 비밀번호 해싱
+        new_password_hash = get_password_hash(request.new_password)
+        
+        # 비밀번호 업데이트
+        update_result = supabase.table("user").update({"password_hash": new_password_hash}).eq("id", user_id).execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to reset password")
+        
+        # 사용된 재설정 코드 삭제
+        supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
+        
+        return {
+            "message": "Password reset successfully. You can now login with your new password."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in reset_password: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset password: {str(e)}")
