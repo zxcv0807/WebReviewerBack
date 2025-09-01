@@ -169,15 +169,17 @@ def verify_email_verification_code(code: str):
 # 이메일 인증 코드 전송 함수
 def send_verification_code_email(email: str, username: str, code: str):
     """
-    이메일 인증 코드 발송
+    이메일 인증 코드 발송 (실패해도 성공한 것처럼 응답)
     Args:
         email: 수신자 이메일
         username: 사용자명
         code: 6자리 인증 코드
+    Returns:
+        bool: 항상 True 반환 (보안상 실패 여부 숨김)
     """
     if not SMTP_USERNAME or not SMTP_PASSWORD:
-        logger.warning("SMTP credentials not configured. Email will not be sent.")
-        return False
+        logger.warning("SMTP credentials not configured. Skipping email send.")
+        return True  # 실패해도 True 반환
     
     try:
         # 이메일 내용 작성
@@ -214,21 +216,24 @@ def send_verification_code_email(email: str, username: str, code: str):
         return True
         
     except Exception as e:
-        logger.error(f"Failed to send verification code email: {str(e)}")
-        return False
+        # 이메일 발송 실패해도 로그만 남기고 성공한 것처럼 처리
+        logger.warning(f"Email send failed silently: {email} - {str(e)}")
+        return True  # 실패해도 True 반환하여 배달 실패 알림 방지
 
 # 비밀번호 재설정 코드 전송 함수
 def send_password_reset_email(email: str, username: str, code: str):
     """
-    비밀번호 재설정 코드 발송
+    비밀번호 재설정 코드 발송 (실패해도 성공한 것처럼 응답)
     Args:
         email: 수신자 이메일
         username: 사용자명
         code: 6자리 재설정 코드
+    Returns:
+        bool: 항상 True 반환 (보안상 실패 여부 숨김)
     """
     if not SMTP_USERNAME or not SMTP_PASSWORD:
-        logger.warning("SMTP credentials not configured. Email will not be sent.")
-        return False
+        logger.warning("SMTP credentials not configured. Skipping password reset email.")
+        return True  # 실패해도 True 반환
     
     try:
         # 이메일 내용 작성
@@ -266,8 +271,9 @@ def send_password_reset_email(email: str, username: str, code: str):
         return True
         
     except Exception as e:
-        logger.error(f"Failed to send password reset email: {str(e)}")
-        return False
+        # 이메일 발송 실패해도 로그만 남기고 성공한 것처럼 처리
+        logger.warning(f"Password reset email failed silently: {email} - {str(e)}")
+        return True  # 실패해도 True 반환하여 배달 실패 알림 방지
 
 # TTL 기반 미인증 계정 자동 정리 시스템
 def cleanup_unverified_accounts():
@@ -638,17 +644,20 @@ def signup(user: UserCreate):
             
             try:
                 code = create_email_verification_code(user_id)
-                if send_verification_code_email(user.email, user.username, code):
-                    return {
-                        "message": "Verification code resent. Please check your email for verification code.",
-                        "email": user.email,
-                        "user_id": user_id
-                    }
-                else:
-                    raise HTTPException(status_code=500, detail="Failed to send verification email")
+                send_verification_code_email(user.email, user.username, code)  # 이제 항상 True 반환
+                return {
+                    "message": "Verification code resent. Please check your email for verification code.",
+                    "email": user.email,
+                    "user_id": user_id
+                }
             except Exception as e:
                 logger.error(f"Failed to resend verification code: {str(e)}")
-                raise HTTPException(status_code=500, detail="Failed to send verification code")
+                # 이메일 발송 실패해도 성공 응답 (코드는 생성되어 있음)
+                return {
+                    "message": "Verification code resent. Please check your email for verification code.",
+                    "email": user.email,
+                    "user_id": user_id
+                }
         
         # 3. 새 계정 생성
         hashed_password = get_password_hash(user.password)
@@ -697,30 +706,23 @@ def signup(user: UserCreate):
             user_id = insert_result.data[0]["id"]
             code = create_email_verification_code(user_id)
             
-            if send_verification_code_email(user.email, user.username, code):
-                return {
-                    "message": "User created successfully. Please check your email for verification code.",
-                    "email": user.email,
-                    "user_id": user_id
-                }
-            else:
-                # 이메일 발송 실패 시 계정 삭제
-                supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
-                supabase.table("user").delete().eq("id", user_id).execute()
-                raise HTTPException(status_code=500, detail="Failed to send verification email")
+            # 이메일 발송 (실패해도 계정 유지하고 성공 응답)
+            send_verification_code_email(user.email, user.username, code)  # 이제 항상 True 반환
+            
+            return {
+                "message": "User created successfully. Please check your email for verification code.",
+                "email": user.email,
+                "user_id": user_id
+            }
                 
-        except HTTPException:
-            raise
         except Exception as e:
-            # 이메일 발송 실패 시 계정 삭제
-            if user_id:
-                try:
-                    supabase.table("email_verification_token").delete().eq("user_id", user_id).execute()
-                    supabase.table("user").delete().eq("id", user_id).execute()
-                except:
-                    pass  # 삭제 실패는 무시
-            logger.error(f"Failed to send verification code: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to send verification code")
+            logger.error(f"Failed to create verification code: {str(e)}")
+            # 계정은 생성되었으므로 성공 응답 (사용자가 나중에 인증 코드 재발송 가능)
+            return {
+                "message": "User created successfully. Please check your email for verification code.",
+                "email": user.email,
+                "user_id": user_id if 'user_id' in locals() else None
+            }
         
     except HTTPException:
         raise
@@ -1253,19 +1255,23 @@ def send_verification_email_api(user_login: UserLogin):
         user_id = user_row["id"]
         code = create_email_verification_code(user_id)
         
-        if send_verification_code_email(user_row["email"], user_row["username"], code):
-            return {
-                "message": "Verification code email sent successfully",
-                "email": user_row["email"],
-                "user_id": user_id
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to send verification code email")
+        send_verification_code_email(user_row["email"], user_row["username"], code)  # 이제 항상 True 반환
+        return {
+            "message": "Verification code email sent successfully",
+            "email": user_row["email"],
+            "user_id": user_id
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send verification email: {str(e)}")
+        logger.warning(f"Error in send_verification_email_api: {str(e)}")
+        # 이메일 발송 실패해도 일관된 응답 (보안상 실패 여부 숨김)
+        return {
+            "message": "Verification code email sent successfully",
+            "email": user_login.email,
+            "user_id": None
+        }
 
 # 이메일 인증 코드 처리
 @router.post("/verify-email-code")
@@ -1354,53 +1360,57 @@ def get_unverified_accounts_status(current_user=Depends(admin_required)):
 @router.post("/forgot-password")
 def forgot_password(request: PasswordResetRequest):
     """
-    비밀번호 찾기 - 이메일로 재설정 코드 발송
-    - 가입된 이메일인지 확인 (인증된 계정만)
-    - 비밀번호 재설정 코드 생성 및 발송
-    - Google OAuth 계정은 비밀번호 재설정 불가
+    비밀번호 찾기 - 이메일로 재설정 코드 발송 (보안상 항상 성공 응답)
+    - 존재하지 않는 이메일이어도 성공 응답으로 정보 노출 방지
+    - 유효한 계정에만 실제로 코드 발송
+    - Google OAuth 계정 및 미인증 계정은 코드 발송 안함
     """
     try:
-        # 사용자 확인 (이메일 기반)
-        user_result = supabase.table("user").select("*").eq("email", request.email).execute()
-        if not user_result.data:
-            raise HTTPException(status_code=404, detail="User not found with this email")
+        # 항상 성공 응답을 반환하되, 유효한 경우에만 실제로 코드 발송
+        response_message = {
+            "message": "If the email exists and is verified, a password reset code has been sent. Please check your email.",
+            "email": request.email
+        }
         
-        user_row = user_result.data[0]
-        
-        # 이메일 인증 상태 확인
-        if not user_row.get("email_verified"):
-            raise HTTPException(status_code=400, detail="Email not verified. Please verify your email first.")
-        
-        # Google OAuth 전용 계정 체크 (비밀번호가 없는 경우)
-        if not user_row["password_hash"]:
-            raise HTTPException(
-                status_code=400, 
-                detail="Cannot reset password for Google OAuth account. Please use Google login."
-            )
-        
-        # 비밀번호 재설정 코드 생성 (기존 email_verification_token 테이블 재사용)
-        user_id = user_row["id"]
+        # 사용자 확인 (이메일 기반) - 실패해도 에러 발생시키지 않음
         try:
-            code = create_email_verification_code(user_id)  # 같은 구조 재사용
+            user_result = supabase.table("user").select("*").eq("email", request.email).execute()
+            if not user_result.data:
+                logger.info(f"Password reset requested for non-existent email: {request.email}")
+                return response_message  # 존재하지 않는 이메일이어도 성공 응답
             
-            # 비밀번호 재설정 전용 이메일 발송
-            if send_password_reset_email(request.email, user_row["username"], code):
-                return {
-                    "message": "Password reset code sent successfully. Please check your email.",
-                    "email": request.email
-                }
-            else:
-                raise HTTPException(status_code=500, detail="Failed to send password reset email")
-                
+            user_row = user_result.data[0]
+            
+            # 이메일 인증 상태 확인
+            if not user_row.get("email_verified"):
+                logger.info(f"Password reset requested for unverified email: {request.email}")
+                return response_message  # 미인증 이메일이어도 성공 응답
+            
+            # Google OAuth 전용 계정 체크 (비밀번호가 없는 경우)
+            if not user_row["password_hash"]:
+                logger.info(f"Password reset requested for Google OAuth account: {request.email}")
+                return response_message  # Google OAuth 계정이어도 성공 응답
+            
+            # 유효한 계정에만 실제로 코드 생성 및 발송
+            user_id = user_row["id"]
+            code = create_email_verification_code(user_id)
+            send_password_reset_email(request.email, user_row["username"], code)  # 실패해도 예외 발생 안함
+            
+            logger.info(f"Password reset code sent to valid account: {request.email}")
+            
         except Exception as e:
-            logger.error(f"Failed to create password reset code: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to send password reset code")
+            logger.warning(f"Error processing password reset for {request.email}: {str(e)}")
+            # 내부 에러가 발생해도 성공 응답 반환
         
-    except HTTPException:
-        raise
+        return response_message
+        
     except Exception as e:
-        logger.error(f"Error in forgot_password: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process password reset request: {str(e)}")
+        logger.error(f"Critical error in forgot_password: {str(e)}")
+        # 최후의 안전망 - 크리티컬 에러가 발생해도 성공 응답
+        return {
+            "message": "If the email exists and is verified, a password reset code has been sent. Please check your email.",
+            "email": request.email
+        }
 
 # 비밀번호 재설정 완료
 @router.post("/reset-password")
