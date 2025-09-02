@@ -446,7 +446,7 @@ def get_post_comments(post_id: int):
         for comment_row in comments_data:
             # 사용자명 조회
             user_row = supabase.table("user").select("username").eq("id", comment_row["user_id"]).single().execute().data
-            user_name = user_row["username"] if user_row else "알 수 없음"
+            user_name = user_row["username"] if user_row else "알수없음"
             
             comments.append(PostCommentResponse(
                 id=comment_row["id"],

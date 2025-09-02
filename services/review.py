@@ -164,7 +164,13 @@ def get_review(review_id: int):
     review_row["view_count"] = current_view_count + 1
     
     comments_data = supabase.table("review_comment").select("*").eq("review_id", review_id).order("created_at").execute().data
-    comments = [CommentResponse(**c) for c in comments_data]
+    comments = []
+    for c in comments_data:
+        comment_user_name = "알수없음"
+        if c.get("user_id"):
+            user_row = supabase.table("user").select("username").eq("id", c["user_id"]).single().execute().data
+            comment_user_name = user_row["username"] if user_row else "알수없음"
+        comments.append(CommentResponse(**c, user_name=comment_user_name))
     # 현재 사용자의 투표 상태 확인 (로그인된 경우만)
     user_vote_type = None
     try:
@@ -177,7 +183,12 @@ def get_review(review_id: int):
     except:
         pass
     
-    return ReviewWithCommentsResponse(**review_row, comments=comments)
+    user_name = "알수없음"
+    if review_row.get("user_id"):
+        user_row = supabase.table("user").select("username").eq("id", review_row["user_id"]).single().execute().data
+        user_name = user_row["username"] if user_row else "알수없음"
+    
+    return ReviewWithCommentsResponse(**review_row, user_name=user_name, comments=comments)
 
 @router.post("/reviews/{review_id}/comments", response_model=CommentResponse)
 def create_comment(review_id: int, comment: CommentCreate, current_user=Depends(get_current_user)):
