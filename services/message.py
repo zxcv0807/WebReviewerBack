@@ -57,8 +57,8 @@ class MessageSend(BaseModel):
 class MessageResponse(BaseModel):
     """쪽지 응답 모델"""
     id: int
-    sender_username: str
-    receiver_username: str
+    sender_username: Optional[str] = None
+    receiver_username: Optional[str] = None
     subject: str
     content: str
     created_at: str
@@ -94,6 +94,58 @@ class UserMemoResponse(BaseModel):
     created_at: str
     updated_at: str
 
+class InboxResponse(BaseModel):
+    """수신 쪽지함 응답 모델"""
+    messages: List[MessageResponse]
+    page: int
+    limit: int
+    total: int
+
+class SentMessagesResponse(BaseModel):
+    """발신 쪽지함 응답 모델"""
+    messages: List[MessageResponse]
+    page: int
+    limit: int
+    total: int
+
+class MemosResponse(BaseModel):
+    """전체 메모 목록 응답 모델"""
+    memos: List[UserMemoResponse]
+    total: int
+
+class MessageSendResponse(BaseModel):
+    """쪽지 발송 응답 모델"""
+    message: str
+    message_id: int
+    receiver: str
+
+class MessageReadResponse(BaseModel):
+    """쪽지 읽음 처리 응답 모델"""
+    message: str
+    read_at: str
+
+class MessageDeleteResponse(BaseModel):
+    """쪽지 삭제 응답 모델"""
+    message: str
+
+class MemoSaveResponse(BaseModel):
+    """메모 저장 응답 모델"""
+    message: str
+    target_username: str
+    memo: str
+
+class MemoGetResponse(BaseModel):
+    """메모 조회 응답 모델"""
+    id: Optional[int] = None
+    target_username: str
+    memo: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class MemoDeleteResponse(BaseModel):
+    """메모 삭제 응답 모델"""
+    message: str
+
 # 유틸리티 함수
 
 def get_user_by_username(username: str):
@@ -115,8 +167,8 @@ def get_user_by_username(username: str):
 
 # 개인 쪽지 API 엔드포인트
 
-@router.post("/send")
-def send_message(message: MessageSend, current_user=Depends(get_current_user)):
+@router.post("/send", response_model=MessageSendResponse)
+def send_message(message: MessageSend, current_user=Depends(get_current_user)) -> MessageSendResponse:
     """
     개인 쪽지 발송
     - 수신자 사용자명으로 쪽지 발송
@@ -147,11 +199,11 @@ def send_message(message: MessageSend, current_user=Depends(get_current_user)):
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to send message")
         
-        return {
-            "message": "Message sent successfully",
-            "message_id": result.data[0]["id"],
-            "receiver": message.receiver_username
-        }
+        return MessageSendResponse(
+            message="Message sent successfully",
+            message_id=result.data[0]["id"],
+            receiver=message.receiver_username
+        )
         
     except HTTPException:
         raise
@@ -159,8 +211,8 @@ def send_message(message: MessageSend, current_user=Depends(get_current_user)):
         logger.error(f"Error sending message: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
 
-@router.get("/inbox")
-def get_inbox(current_user=Depends(get_current_user), page: int = 1, limit: int = 20):
+@router.get("/inbox", response_model=InboxResponse)
+def get_inbox(current_user=Depends(get_current_user), page: int = 1, limit: int = 20) -> InboxResponse:
     """
     수신 쪽지함 조회
     - 페이지네이션 지원
@@ -185,29 +237,29 @@ def get_inbox(current_user=Depends(get_current_user), page: int = 1, limit: int 
         
         messages = []
         for msg in result.data:
-            messages.append({
-                "id": msg["id"],
-                "sender_username": msg["sender"]["username"],
-                "subject": msg["subject"],
-                "content": msg["content"],
-                "created_at": msg["created_at"],
-                "read_at": msg["read_at"],
-                "is_read": msg["read_at"] is not None
-            })
+            messages.append(MessageResponse(
+                id=msg["id"],
+                sender_username=msg["sender"]["username"],
+                subject=msg["subject"],
+                content=msg["content"],
+                created_at=msg["created_at"],
+                read_at=msg["read_at"],
+                is_read=msg["read_at"] is not None
+            ))
         
-        return {
-            "messages": messages,
-            "page": page,
-            "limit": limit,
-            "total": len(messages)
-        }
+        return InboxResponse(
+            messages=messages,
+            page=page,
+            limit=limit,
+            total=len(messages)
+        )
         
     except Exception as e:
         logger.error(f"Error getting inbox: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get inbox: {str(e)}")
 
-@router.get("/sent")
-def get_sent_messages(current_user=Depends(get_current_user), page: int = 1, limit: int = 20):
+@router.get("/sent", response_model=SentMessagesResponse)
+def get_sent_messages(current_user=Depends(get_current_user), page: int = 1, limit: int = 20) -> SentMessagesResponse:
     """
     발신 쪽지함 조회
     - 페이지네이션 지원
@@ -232,29 +284,29 @@ def get_sent_messages(current_user=Depends(get_current_user), page: int = 1, lim
         
         messages = []
         for msg in result.data:
-            messages.append({
-                "id": msg["id"],
-                "receiver_username": msg["receiver"]["username"],
-                "subject": msg["subject"],
-                "content": msg["content"],
-                "created_at": msg["created_at"],
-                "read_at": msg["read_at"],
-                "is_read": msg["read_at"] is not None
-            })
+            messages.append(MessageResponse(
+                id=msg["id"],
+                receiver_username=msg["receiver"]["username"],
+                subject=msg["subject"],
+                content=msg["content"],
+                created_at=msg["created_at"],
+                read_at=msg["read_at"],
+                is_read=msg["read_at"] is not None
+            ))
         
-        return {
-            "messages": messages,
-            "page": page,
-            "limit": limit,
-            "total": len(messages)
-        }
+        return SentMessagesResponse(
+            messages=messages,
+            page=page,
+            limit=limit,
+            total=len(messages)
+        )
         
     except Exception as e:
         logger.error(f"Error getting sent messages: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get sent messages: {str(e)}")
 
-@router.put("/{message_id}/read")
-def mark_message_as_read(message_id: int, current_user=Depends(get_current_user)):
+@router.put("/{message_id}/read", response_model=MessageReadResponse)
+def mark_message_as_read(message_id: int, current_user=Depends(get_current_user)) -> MessageReadResponse:
     """
     쪽지 읽음 처리
     - 수신자만 읽음 처리 가능
@@ -271,7 +323,7 @@ def mark_message_as_read(message_id: int, current_user=Depends(get_current_user)
         
         # 이미 읽은 쪽지인 경우
         if message_data["read_at"]:
-            return {"message": "Message already read", "read_at": message_data["read_at"]}
+            return MessageReadResponse(message="Message already read", read_at=message_data["read_at"])
         
         # 읽음 처리
         read_at = datetime.utcnow().isoformat()
@@ -280,7 +332,7 @@ def mark_message_as_read(message_id: int, current_user=Depends(get_current_user)
         if not update_result.data:
             raise HTTPException(status_code=500, detail="Failed to mark message as read")
         
-        return {"message": "Message marked as read", "read_at": read_at}
+        return MessageReadResponse(message="Message marked as read", read_at=read_at)
         
     except HTTPException:
         raise
@@ -288,8 +340,8 @@ def mark_message_as_read(message_id: int, current_user=Depends(get_current_user)
         logger.error(f"Error marking message as read: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to mark message as read: {str(e)}")
 
-@router.delete("/{message_id}")
-def delete_message(message_id: int, current_user=Depends(get_current_user)):
+@router.delete("/{message_id}", response_model=MessageDeleteResponse)
+def delete_message(message_id: int, current_user=Depends(get_current_user)) -> MessageDeleteResponse:
     """
     쪽지 삭제 (소프트 삭제)
     - 발신자는 is_deleted_by_sender = true
@@ -323,9 +375,9 @@ def delete_message(message_id: int, current_user=Depends(get_current_user)):
         if (update_data.get("is_deleted_by_sender") and message_data.get("is_deleted_by_receiver")) or \
            (update_data.get("is_deleted_by_receiver") and message_data.get("is_deleted_by_sender")):
             supabase.table("private_message").delete().eq("id", message_id).execute()
-            return {"message": "Message permanently deleted"}
+            return MessageDeleteResponse(message="Message permanently deleted")
         
-        return {"message": "Message deleted successfully"}
+        return MessageDeleteResponse(message="Message deleted successfully")
         
     except HTTPException:
         raise
@@ -335,8 +387,8 @@ def delete_message(message_id: int, current_user=Depends(get_current_user)):
 
 # 사용자 메모 API 엔드포인트
 
-@router.post("/memo")
-def save_user_memo(memo: UserMemo, current_user=Depends(get_current_user)):
+@router.post("/memo", response_model=MemoSaveResponse)
+def save_user_memo(memo: UserMemo, current_user=Depends(get_current_user)) -> MemoSaveResponse:
     """
     사용자 메모 저장
     - 대상 사용자에 대한 개인 메모 저장
@@ -367,11 +419,11 @@ def save_user_memo(memo: UserMemo, current_user=Depends(get_current_user)):
             if not update_result.data:
                 raise HTTPException(status_code=500, detail="Failed to update memo")
             
-            return {
-                "message": "Memo updated successfully",
-                "target_username": memo.target_username,
-                "memo": memo.memo
-            }
+            return MemoSaveResponse(
+                message="Memo updated successfully",
+                target_username=memo.target_username,
+                memo=memo.memo
+            )
         else:
             # 새 메모 생성
             memo_data = {
@@ -387,11 +439,11 @@ def save_user_memo(memo: UserMemo, current_user=Depends(get_current_user)):
             if not insert_result.data:
                 raise HTTPException(status_code=500, detail="Failed to save memo")
             
-            return {
-                "message": "Memo saved successfully",
-                "target_username": memo.target_username,
-                "memo": memo.memo
-            }
+            return MemoSaveResponse(
+                message="Memo saved successfully",
+                target_username=memo.target_username,
+                memo=memo.memo
+            )
         
     except HTTPException:
         raise
@@ -399,8 +451,8 @@ def save_user_memo(memo: UserMemo, current_user=Depends(get_current_user)):
         logger.error(f"Error saving user memo: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save memo: {str(e)}")
 
-@router.get("/memo/{target_username}")
-def get_user_memo(target_username: str, current_user=Depends(get_current_user)):
+@router.get("/memo/{target_username}", response_model=MemoGetResponse)
+def get_user_memo(target_username: str, current_user=Depends(get_current_user)) -> MemoGetResponse:
     """
     특정 사용자에 대한 메모 조회
     """
@@ -414,17 +466,17 @@ def get_user_memo(target_username: str, current_user=Depends(get_current_user)):
         memo_result = supabase.table("user_memo").select("*").eq("user_id", current_user["id"]).eq("target_user_id", target_user["id"]).execute()
         
         if not memo_result.data:
-            return {"memo": None, "target_username": target_username}
+            return MemoGetResponse(target_username=target_username)
         
         memo_data = memo_result.data[0]
         
-        return {
-            "id": memo_data["id"],
-            "target_username": target_username,
-            "memo": memo_data["memo"],
-            "created_at": memo_data["created_at"],
-            "updated_at": memo_data["updated_at"]
-        }
+        return MemoGetResponse(
+            id=memo_data["id"],
+            target_username=target_username,
+            memo=memo_data["memo"],
+            created_at=memo_data["created_at"],
+            updated_at=memo_data["updated_at"]
+        )
         
     except HTTPException:
         raise
@@ -432,8 +484,8 @@ def get_user_memo(target_username: str, current_user=Depends(get_current_user)):
         logger.error(f"Error getting user memo: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get memo: {str(e)}")
 
-@router.get("/memos")
-def get_all_memos(current_user=Depends(get_current_user)):
+@router.get("/memos", response_model=MemosResponse)
+def get_all_memos(current_user=Depends(get_current_user)) -> MemosResponse:
     """
     내가 작성한 모든 메모 조회
     """
@@ -452,22 +504,22 @@ def get_all_memos(current_user=Depends(get_current_user)):
         
         memos = []
         for memo in memos_result.data:
-            memos.append({
-                "id": memo["id"],
-                "target_username": memo["target_user"]["username"],
-                "memo": memo["memo"],
-                "created_at": memo["created_at"],
-                "updated_at": memo["updated_at"]
-            })
+            memos.append(UserMemoResponse(
+                id=memo["id"],
+                target_username=memo["target_user"]["username"],
+                memo=memo["memo"],
+                created_at=memo["created_at"],
+                updated_at=memo["updated_at"]
+            ))
         
-        return {"memos": memos, "total": len(memos)}
+        return MemosResponse(memos=memos, total=len(memos))
         
     except Exception as e:
         logger.error(f"Error getting all memos: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get memos: {str(e)}")
 
-@router.delete("/memo/{target_username}")
-def delete_user_memo(target_username: str, current_user=Depends(get_current_user)):
+@router.delete("/memo/{target_username}", response_model=MemoDeleteResponse)
+def delete_user_memo(target_username: str, current_user=Depends(get_current_user)) -> MemoDeleteResponse:
     """
     특정 사용자에 대한 메모 삭제
     """
@@ -483,7 +535,7 @@ def delete_user_memo(target_username: str, current_user=Depends(get_current_user
         if not delete_result.data:
             raise HTTPException(status_code=404, detail="Memo not found")
         
-        return {"message": f"Memo for {target_username} deleted successfully"}
+        return MemoDeleteResponse(message=f"Memo for {target_username} deleted successfully")
         
     except HTTPException:
         raise
