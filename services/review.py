@@ -111,23 +111,26 @@ def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
 
 @router.get("/reviews", response_model=PaginatedResponse[ReviewWithCommentsResponse])
 def get_reviews(
-    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count, like_count, dislike_count, rating"),
-    sort_order: str = Query(default="desc", description="정렬 순서: desc, asc"),
+    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count"),
+    sort_order: str = Query(default="desc", description="정렬 순서 (항상 desc)"),
     page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
     limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
 ):
     # 정렬 파라미터 검증
-    valid_sort_fields = ["created_at", "updated_at", "view_count", "like_count", "dislike_count", "rating"]
+    valid_sort_fields = ["created_at", "view_count"]
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
     
-    sort_desc = (sort_order.lower() == "desc")
+    # 항상 내림차순 정렬
+    sort_desc = True
     
-    # 총 개수 조회
-    total_count = len(supabase.table("review").select("id").execute().data)
+    # 최적화된 총 개수 조회
+    count_response = supabase.table("review").select("id", count="exact").execute()
+    total_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
     
     # 페이지네이션을 적용한 리뷰 데이터 조회
-    reviews = supabase.table("review").select("*").order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+    offset = get_offset(page, limit)
+    reviews = supabase.table("review").select("*").order(sort_by, desc=sort_desc).range(offset, offset + limit - 1).execute().data
     
     # 해당 리뷰들의 댓글만 조회
     review_ids = [r["id"] for r in reviews]
@@ -136,21 +139,30 @@ def get_reviews(
     else:
         comments = []
     
+    # N+1 사용자 조회 문제 해결 - 리뷰 작성자와 댓글 작성자 한 번에 조회
+    all_user_ids = set()
+    for r in reviews:
+        if r.get("user_id"):
+            all_user_ids.add(r["user_id"])
+    for c in comments:
+        if c.get("user_id"):
+            all_user_ids.add(c["user_id"])
+    
+    users_data = {}
+    if all_user_ids:
+        all_users = supabase.table("user").select("id, username").in_("id", list(all_user_ids)).execute().data
+        for user_row in all_users:
+            users_data[user_row["id"]] = user_row["username"]
+    
     reviews_dict = {}
     for r in reviews:
-        user_name = "알수없음"
-        if r.get("user_id"):
-            user_row = supabase.table("user").select("username").eq("id", r["user_id"]).single().execute().data
-            user_name = user_row["username"] if user_row else "알수없음"
+        user_name = users_data.get(r.get("user_id"), "알수없음")
         reviews_dict[r["id"]] = ReviewWithCommentsResponse(**r, user_name=user_name, comments=[])
     
     # 댓글 추가
     for c in comments:
         if c["review_id"] in reviews_dict:
-            comment_user_name = "알수없음"
-            if c.get("user_id"):
-                user_row = supabase.table("user").select("username").eq("id", c["user_id"]).single().execute().data
-                comment_user_name = user_row["username"] if user_row else "알수없음"
+            comment_user_name = users_data.get(c.get("user_id"), "알수없음")
             reviews_dict[c["review_id"]].comments.append(CommentResponse(**c, user_name=comment_user_name))
     
     pagination_info = create_pagination_info(page, limit, total_count)

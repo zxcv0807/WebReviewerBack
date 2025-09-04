@@ -103,32 +103,43 @@ def create_phishing_site(phishing_site: PhishingSiteCreate, current_user=Depends
 @router.get("/phishing-sites", response_model=PaginatedResponse[PhishingSiteResponse])
 def get_phishing_sites(
     status: Optional[str] = None,
-    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count, like_count, dislike_count"),
-    sort_order: str = Query(default="desc", description="정렬 순서: desc, asc"),
+    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count"),
+    sort_order: str = Query(default="desc", description="정렬 순서 (항상 desc)"),
     page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
     limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
 ):
     # 정렬 파라미터 검증
-    valid_sort_fields = ["created_at", "updated_at", "view_count", "like_count", "dislike_count"]
+    valid_sort_fields = ["created_at", "view_count"]
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
     
-    sort_desc = (sort_order.lower() == "desc")
+    # 항상 내림차순 정렬
+    sort_desc = True
     
-    # 총 개수 조회
+    # 최적화된 총 개수 조회
+    offset = get_offset(page, limit)
+    
     if status:
-        total_count = len(supabase.table("phishing_site").select("id").eq("status", status).execute().data)
-        sites = supabase.table("phishing_site").select("*").eq("status", status).order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        count_response = supabase.table("phishing_site").select("id", count="exact").eq("status", status).execute()
+        total_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
+        sites = supabase.table("phishing_site").select("*").eq("status", status).order(sort_by, desc=sort_desc).range(offset, offset + limit - 1).execute().data
     else:
-        total_count = len(supabase.table("phishing_site").select("id").execute().data)
-        sites = supabase.table("phishing_site").select("*").order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        count_response = supabase.table("phishing_site").select("id", count="exact").execute()
+        total_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
+        sites = supabase.table("phishing_site").select("*").order(sort_by, desc=sort_desc).range(offset, offset + limit - 1).execute().data
+    
+    # N+1 사용자 조회 문제 해결 - 한 번에 모든 사용자 조회
+    user_ids = [site["user_id"] for site in sites if site.get("user_id")]
+    users_data = {}
+    
+    if user_ids:
+        all_users = supabase.table("user").select("id, username").in_("id", user_ids).execute().data
+        for user_row in all_users:
+            users_data[user_row["id"]] = user_row["username"]
     
     sites_data = []
     for site in sites:
-        user_name = "알수없음"
-        if site.get("user_id"):
-            user_row = supabase.table("user").select("username").eq("id", site["user_id"]).single().execute().data
-            user_name = user_row["username"] if user_row else "알수없음"
+        user_name = users_data.get(site.get("user_id"), "알수없음")
         sites_data.append(PhishingSiteResponse(**site, user_name=user_name))
     pagination_info = create_pagination_info(page, limit, total_count)
     return PaginatedResponse(data=sites_data, pagination=pagination_info)

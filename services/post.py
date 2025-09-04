@@ -115,8 +115,8 @@ def get_posts(
     category: Optional[str] = None, 
     tag: Optional[str] = None, 
     type: Optional[str] = None,
-    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count, like_count, dislike_count"),
-    sort_order: str = Query(default="desc", description="정렬 순서: desc, asc"),
+    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count"),
+    sort_order: str = Query(default="desc", description="정렬 순서 (항상 desc)"),
     page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
     limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
 ):
@@ -131,37 +131,58 @@ def get_posts(
         db_category = category_map.get(category, category)
     
     # 정렬 파라미터 검증
-    valid_sort_fields = ["created_at", "updated_at", "view_count", "like_count", "dislike_count"]
+    valid_sort_fields = ["created_at", "view_count"]
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
     
-    sort_desc = (sort_order.lower() == "desc")
+    # 항상 내림차순 정렬
+    sort_desc = True
     
-    # 총 개수 조회
+    # 최적화된 쿼리 - count() 함수 사용으로 총 개수 조회 최적화
+    offset = get_offset(page, limit)
+    
     if tag:
-        total_count = len(supabase.table("post").select("id", "tag(name)").eq("tag.name", tag).execute().data)
-        post_rows = supabase.table("post").select("*", "tag(name)").eq("tag.name", tag).order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        # 태그 기반 검색 - 안전한 방식으로 수정
+        count_response = supabase.table("post").select("id", "tag(name)", count="exact").eq("tag.name", tag).execute()
+        total_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
+        post_rows = supabase.table("post").select("*", "tag(name)").eq("tag.name", tag).order(sort_by, desc=sort_desc).range(offset, offset + limit - 1).execute().data
     elif db_category:
-        total_count = len(supabase.table("post").select("id").eq("category", db_category).execute().data)
-        post_rows = supabase.table("post").select("*").eq("category", db_category).order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        # 카테고리 기반 검색  
+        count_response = supabase.table("post").select("id", count="exact").eq("category", db_category).execute()
+        total_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
+        post_rows = supabase.table("post").select("*").eq("category", db_category).order(sort_by, desc=sort_desc).range(offset, offset + limit - 1).execute().data
     else:
-        total_count = len(supabase.table("post").select("id").execute().data)
-        post_rows = supabase.table("post").select("*").order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        # 전체 게시물 조회
+        count_response = supabase.table("post").select("id", count="exact").execute()
+        total_count = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
+        post_rows = supabase.table("post").select("*").order(sort_by, desc=sort_desc).range(offset, offset + limit - 1).execute().data
     
+    # N+1 쿼리 문제 해결 - 한 번에 모든 태그 조회
+    post_ids = [post["id"] for post in post_rows]
+    tags_data = {}
+    
+    if post_ids:
+        all_tags = supabase.table("tag").select("post_id, name").in_("post_id", post_ids).execute().data
+        for tag_row in all_tags:
+            post_id = tag_row["post_id"]
+            if post_id not in tags_data:
+                tags_data[post_id] = []
+            tags_data[post_id].append(tag_row["name"])
+    
+    # 게시물 응답 생성 (사용자 조회 최적화)
     posts = []
     for post_row in post_rows:
-        tags = [row["name"] for row in supabase.table("tag").select("name").eq("post_id", post_row["id"]).execute().data]
-        user_name = post_row.get("user_name")
-        if not user_name and post_row.get("user_id"):
-            user_row = supabase.table("user").select("username").eq("id", post_row["user_id"]).single().execute().data
-            user_name = user_row["username"] if user_row else "알수없음"
-        elif not user_name:
-            user_name = "알수없음"
+        # 태그 정보 추가
+        tags = tags_data.get(post_row["id"], [])
+        
+        # user_name이 이미 있으면 사용, 없으면 기본값
+        user_name = post_row.get("user_name", "알수없음")
+        
         posts.append(PostResponse(
             id=post_row["id"],
             title=post_row["title"],
             category=post_row["category"],
-            content=json.loads(post_row["content"]),
+            content=json.loads(post_row["content"]) if isinstance(post_row["content"], str) else post_row["content"],
             tags=tags,
             created_at=post_row["created_at"],
             updated_at=post_row["updated_at"],

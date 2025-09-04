@@ -13,8 +13,8 @@ router = APIRouter()
 class SearchParams(BaseModel):
     query: str = Field(..., description="검색어")
     content_type: Optional[str] = Field(None, description="컨텐츠 타입 필터: 'posts', 'reviews', 'phishing' 또는 전체검색시 None")
-    sort_by: Optional[str] = Field("created_at", description="정렬 기준: 'created_at', 'view_count', 'like_count', 'rating'(리뷰만)")
-    sort_order: Optional[str] = Field("desc", description="정렬 순서: 'desc', 'asc'")
+    sort_by: Optional[str] = Field("created_at", description="정렬 기준: 'created_at', 'view_count'")
+    sort_order: Optional[str] = Field("desc", description="정렬 순서 (항상 desc)")
     min_rating: Optional[float] = Field(None, description="최소 평점 (리뷰 검색시)")
     max_rating: Optional[float] = Field(None, description="최대 평점 (리뷰 검색시)")
     category: Optional[str] = Field(None, description="게시판 카테고리 필터")
@@ -63,8 +63,8 @@ async def search_posts(query: str, category: Optional[str] = None, tags: Optiona
             query_builder = query_builder.eq("category", category)
             
         # 정렬
-        if sort_by in ["created_at", "updated_at", "view_count", "like_count", "dislike_count"]:
-            query_builder = query_builder.order(sort_by, desc=(sort_order == "desc"))
+        if sort_by in ["created_at", "view_count"]:
+            query_builder = query_builder.order(sort_by, desc=True)
         
         # 페이지네이션
         query_builder = query_builder.range(offset, offset + limit - 1)
@@ -122,9 +122,9 @@ async def search_reviews(query: str, min_rating: Optional[float] = None, max_rat
             query_builder = query_builder.lte("rating", max_rating)
             
         # 정렬
-        valid_sorts = ["created_at", "updated_at", "view_count", "like_count", "dislike_count", "rating"]
+        valid_sorts = ["created_at", "view_count"]
         if sort_by in valid_sorts:
-            query_builder = query_builder.order(sort_by, desc=(sort_order == "desc"))
+            query_builder = query_builder.order(sort_by, desc=True)
         
         # 페이지네이션
         query_builder = query_builder.range(offset, offset + limit - 1)
@@ -162,8 +162,8 @@ async def search_phishing_sites(query: str, sort_by: str = "created_at", sort_or
             )
         
         # 정렬
-        if sort_by in ["created_at", "updated_at", "view_count", "like_count", "dislike_count"]:
-            query_builder = query_builder.order(sort_by, desc=(sort_order == "desc"))
+        if sort_by in ["created_at", "view_count"]:
+            query_builder = query_builder.order(sort_by, desc=True)
         
         # 페이지네이션
         query_builder = query_builder.range(offset, offset + limit - 1)
@@ -254,8 +254,8 @@ def format_search_results(posts_data: List[Dict], reviews_data: List[Dict],
 async def unified_search(
     q: str = Query(..., description="검색어"),
     content_type: Optional[str] = Query(None, description="컨텐츠 타입: 'posts', 'reviews', 'phishing'"),
-    sort_by: str = Query("created_at", description="정렬 기준"),
-    sort_order: str = Query("desc", description="정렬 순서"),
+    sort_by: str = Query("created_at", description="정렬 기준: created_at, view_count"),
+    sort_order: str = Query("desc", description="정렬 순서 (항상 desc)"),
     min_rating: Optional[float] = Query(None, description="최소 평점 (리뷰)"),
     max_rating: Optional[float] = Query(None, description="최대 평점 (리뷰)"),
     category: Optional[str] = Query(None, description="게시판 카테고리"),
@@ -309,10 +309,10 @@ async def unified_search(
         
         # 통합 검색시 날짜 기준으로 재정렬
         if not content_type:
-            all_results.sort(
-                key=lambda x: x.created_at, 
-                reverse=(sort_order == "desc")
-            )
+            if sort_by == "view_count":
+                all_results.sort(key=lambda x: x.view_count, reverse=True)
+            else:
+                all_results.sort(key=lambda x: x.created_at, reverse=True)
             # 페이지네이션 적용
             total_count = len(all_results)
             all_results = all_results[offset:offset + pagination.page_size]
