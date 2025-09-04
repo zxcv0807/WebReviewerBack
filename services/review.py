@@ -111,14 +111,23 @@ def create_review(review: ReviewCreate, current_user=Depends(get_current_user)):
 
 @router.get("/reviews", response_model=PaginatedResponse[ReviewWithCommentsResponse])
 def get_reviews(
+    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count, like_count, dislike_count, rating"),
+    sort_order: str = Query(default="desc", description="정렬 순서: desc, asc"),
     page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
     limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
 ):
+    # 정렬 파라미터 검증
+    valid_sort_fields = ["created_at", "updated_at", "view_count", "like_count", "dislike_count", "rating"]
+    if sort_by not in valid_sort_fields:
+        sort_by = "created_at"
+    
+    sort_desc = (sort_order.lower() == "desc")
+    
     # 총 개수 조회
     total_count = len(supabase.table("review").select("id").execute().data)
     
     # 페이지네이션을 적용한 리뷰 데이터 조회
-    reviews = supabase.table("review").select("*").order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+    reviews = supabase.table("review").select("*").order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     
     # 해당 리뷰들의 댓글만 조회
     review_ids = [r["id"] for r in reviews]

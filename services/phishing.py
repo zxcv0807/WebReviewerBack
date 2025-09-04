@@ -103,16 +103,25 @@ def create_phishing_site(phishing_site: PhishingSiteCreate, current_user=Depends
 @router.get("/phishing-sites", response_model=PaginatedResponse[PhishingSiteResponse])
 def get_phishing_sites(
     status: Optional[str] = None,
+    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count, like_count, dislike_count"),
+    sort_order: str = Query(default="desc", description="정렬 순서: desc, asc"),
     page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
     limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
 ):
+    # 정렬 파라미터 검증
+    valid_sort_fields = ["created_at", "updated_at", "view_count", "like_count", "dislike_count"]
+    if sort_by not in valid_sort_fields:
+        sort_by = "created_at"
+    
+    sort_desc = (sort_order.lower() == "desc")
+    
     # 총 개수 조회
     if status:
         total_count = len(supabase.table("phishing_site").select("id").eq("status", status).execute().data)
-        sites = supabase.table("phishing_site").select("*").eq("status", status).order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        sites = supabase.table("phishing_site").select("*").eq("status", status).order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     else:
         total_count = len(supabase.table("phishing_site").select("id").execute().data)
-        sites = supabase.table("phishing_site").select("*").order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        sites = supabase.table("phishing_site").select("*").order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     
     sites_data = []
     for site in sites:

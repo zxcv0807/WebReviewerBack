@@ -115,6 +115,8 @@ def get_posts(
     category: Optional[str] = None, 
     tag: Optional[str] = None, 
     type: Optional[str] = None,
+    sort_by: str = Query(default="created_at", description="정렬 기준: created_at, view_count, like_count, dislike_count"),
+    sort_order: str = Query(default="desc", description="정렬 순서: desc, asc"),
     page: int = Query(default=1, ge=1, description="페이지 번호 (1부터 시작)"),
     limit: int = Query(default=10, ge=1, le=10, description="페이지당 항목 수 (최대 10)")
 ):
@@ -128,16 +130,23 @@ def get_posts(
     if category:
         db_category = category_map.get(category, category)
     
+    # 정렬 파라미터 검증
+    valid_sort_fields = ["created_at", "updated_at", "view_count", "like_count", "dislike_count"]
+    if sort_by not in valid_sort_fields:
+        sort_by = "created_at"
+    
+    sort_desc = (sort_order.lower() == "desc")
+    
     # 총 개수 조회
     if tag:
         total_count = len(supabase.table("post").select("id", "tag(name)").eq("tag.name", tag).execute().data)
-        post_rows = supabase.table("post").select("*", "tag(name)").eq("tag.name", tag).order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        post_rows = supabase.table("post").select("*", "tag(name)").eq("tag.name", tag).order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     elif db_category:
         total_count = len(supabase.table("post").select("id").eq("category", db_category).execute().data)
-        post_rows = supabase.table("post").select("*").eq("category", db_category).order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        post_rows = supabase.table("post").select("*").eq("category", db_category).order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     else:
         total_count = len(supabase.table("post").select("id").execute().data)
-        post_rows = supabase.table("post").select("*").order("created_at", desc=True).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
+        post_rows = supabase.table("post").select("*").order(sort_by, desc=sort_desc).range(get_offset(page, limit), get_offset(page, limit) + limit - 1).execute().data
     
     posts = []
     for post_row in post_rows:
