@@ -16,9 +16,19 @@ class SearchResultItem(BaseModel):
     url: Optional[str] = None
     created_at: str
     user_name: str = "알수없음"
+    view_count: Optional[int] = 0
     rating: Optional[float] = None  # 리뷰의 경우만
     category: Optional[str] = None  # 게시판의 경우만
     tags: Optional[List[str]] = None  # 게시판의 경우만
+
+# 경량화된 검색 결과 모델 (미리보기용 - 모든 게시판 공통 필드)
+class SearchResultPreview(BaseModel):
+    id: int
+    content_type: str  # 'post', 'review', 'phishing'
+    title: str
+    user_name: str = "알수없음"
+    created_at: str
+    view_count: Optional[int] = 0
 
 class SearchResponse(BaseModel):
     results: List[SearchResultItem]
@@ -27,6 +37,15 @@ class SearchResponse(BaseModel):
     total_pages: int
     has_next: bool
     has_previous: bool
+
+class SearchPreviewResponse(BaseModel):
+    results: List[SearchResultPreview]
+    total_count: int
+    current_page: int
+    total_pages: int
+    has_next: bool
+    has_previous: bool
+
 
 async def unified_search_all_content(query: str, page: int = 1, limit: int = 10, sort_by: str = "created_at") -> SearchResponse:
     """
@@ -67,12 +86,66 @@ async def unified_search_all_content(query: str, page: int = 1, limit: int = 10,
                 url=item.get("url"),
                 created_at=item["created_at"],
                 user_name=item.get("user_name", "알수없음"),
+                view_count=item.get("view_count", 0),
                 rating=item.get("rating"),
                 category=item.get("category"),
                 tags=item.get("tags", [])
             ))
         
         return SearchResponse(
+            results=search_results,
+            total_count=total_count,
+            current_page=page,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_previous=page > 1
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"검색 오류: {str(e)}")
+
+async def unified_search_preview(query: str, page: int = 1, limit: int = 10, sort_by: str = "created_at") -> SearchPreviewResponse:
+    """
+    경량화된 검색: 모든 게시판 공통 필드만 반환
+    - id, content_type, title, user_name, created_at, view_count만 반환
+    - summary, url, rating, category 등 상세 내용은 제외
+    """
+    try:
+        all_results = []
+        search_keyword = f"%{query.strip()}%"
+        
+        # 1. 자유게시판 검색 (제목, 내용, 작성자명, 태그)
+        await search_posts_content(search_keyword, all_results)
+        
+        # 2. 리뷰 검색 (사이트명, 요약, 장점, 단점, 작성자명)
+        await search_reviews_content(search_keyword, all_results)
+        
+        # 3. 피싱 신고 검색 (URL, 사유, 설명, 작성자명)
+        await search_phishing_content(search_keyword, all_results)
+        
+        # 결과 정렬
+        if sort_by == "created_at":
+            all_results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        # 페이지네이션 계산
+        total_count = len(all_results)
+        total_pages = (total_count + limit - 1) // limit
+        offset = (page - 1) * limit
+        paginated_results = all_results[offset:offset + limit]
+        
+        # 응답 데이터 구성 (미리보기용 공통 필드만 포함)
+        search_results = []
+        for item in paginated_results:
+            search_results.append(SearchResultPreview(
+                id=item["id"],
+                content_type=item["content_type"],
+                title=item["title"],
+                user_name=item.get("user_name", "알수없음"),
+                created_at=item["created_at"],
+                view_count=item.get("view_count", 0)
+            ))
+        
+        return SearchPreviewResponse(
             results=search_results,
             total_count=total_count,
             current_page=page,
@@ -138,6 +211,7 @@ async def search_posts_content(search_keyword: str, all_results: List[Dict]):
                 "summary": summary,
                 "created_at": post["created_at"],
                 "user_name": post.get("user_name", "알수없음"),
+                "view_count": post.get("view_count", 0),
                 "category": post.get("category"),
                 "tags": post_tags
             })
@@ -193,6 +267,7 @@ async def search_reviews_content(search_keyword: str, all_results: List[Dict]):
                 "url": review.get("url"),
                 "created_at": review["created_at"],
                 "user_name": user_name,
+                "view_count": review.get("view_count", 0),
                 "rating": review.get("rating")
             })
             
@@ -246,7 +321,8 @@ async def search_phishing_content(search_keyword: str, all_results: List[Dict]):
                 "summary": site.get("description", site["reason"]),
                 "url": site["url"],
                 "created_at": site["created_at"],
-                "user_name": user_name
+                "user_name": user_name,
+                "view_count": site.get("view_count", 0)
             })
             
     except Exception as e:
@@ -260,15 +336,35 @@ async def search_all(
     sort_by: str = Query("created_at", description="정렬 기준")
 ):
     """
-    통합 검색 API
+    통합 검색 API (전체 데이터)
     - 자유게시판, 리뷰, 피싱 신고를 모두 검색
     - 제목, 내용, 작성자명, 태그(게시판만)에서 검색
     - content_type으로 게시물 유형 구분 가능
+    - 상세 정보가 필요한 경우 사용
     """
     if not q.strip():
         raise HTTPException(status_code=400, detail="검색어를 입력해주세요")
     
     return await unified_search_all_content(q, page, limit, sort_by)
+
+@router.get("/preview", response_model=SearchPreviewResponse, summary="경량화된 검색 (미리보기용)")
+async def search_preview(
+    q: str = Query(..., description="검색어"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(10, ge=1, le=50, description="페이지당 결과 수"),
+    sort_by: str = Query("created_at", description="정렬 기준")
+):
+    """
+    경량화된 검색 API (목록용)
+    - 자유게시판, 리뷰, 피싱 신고를 모두 검색
+    - 모든 게시판 공통 필드만 반환하여 데이터 사용량 최소화
+    - 반환 필드: id, content_type, title, user_name, created_at, view_count
+    - summary, url, rating, category 등 상세 내용은 제외
+    """
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="검색어를 입력해주세요")
+    
+    return await unified_search_preview(q, page, limit, sort_by)
 
 @router.get("/suggestions", summary="검색 추천어")
 async def get_search_suggestions(
