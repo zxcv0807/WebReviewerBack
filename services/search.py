@@ -53,10 +53,10 @@ async def search_posts(query: str, category: Optional[str] = None, tags: Optiona
             "id, title, content, category, created_at, updated_at, user_name, view_count, like_count, dislike_count"
         )
         
-        # 텍스트 검색 (제목, 사용자명에서)
+        # 텍스트 검색 (제목, 내용, 사용자명에서)
         if query.strip():
             # PostgreSQL의 ilike를 사용한 대소문자 무시 검색
-            query_builder = query_builder.or_(f"title.ilike.%{query}%,user_name.ilike.%{query}%")
+            query_builder = query_builder.or_(f"title.ilike.%{query}%,content.ilike.%{query}%,user_name.ilike.%{query}%")
         
         # 카테고리 필터
         if category:
@@ -115,6 +115,32 @@ async def search_reviews(query: str, min_rating: Optional[float] = None, max_rat
                 f"site_name.ilike.%{query}%,summary.ilike.%{query}%,pros.ilike.%{query}%,cons.ilike.%{query}%"
             )
         
+        # 작성자명으로도 검색 가능하도록 별도 쿼리로 추가 검색
+        user_filtered_reviews = []
+        if query.strip():
+            # 사용자명으로 검색
+            user_response = supabase.table("user").select("id, username").ilike("username", f"%{query}%").execute()
+            user_ids = [user["id"] for user in user_response.data]
+            
+            if user_ids:
+                # 해당 사용자들의 리뷰 가져오기
+                user_review_builder = supabase.table("review").select(
+                    "id, site_name, url, summary, rating, pros, cons, created_at, updated_at, view_count, like_count, dislike_count, user_id"
+                ).in_("user_id", user_ids)
+                
+                # 평점 필터 적용
+                if min_rating is not None:
+                    user_review_builder = user_review_builder.gte("rating", min_rating)
+                if max_rating is not None:
+                    user_review_builder = user_review_builder.lte("rating", max_rating)
+                
+                # 정렬 적용
+                if sort_by in ["created_at", "view_count"]:
+                    user_review_builder = user_review_builder.order(sort_by, desc=True)
+                    
+                user_review_response = user_review_builder.execute()
+                user_filtered_reviews = user_review_response.data
+        
         # 평점 필터
         if min_rating is not None:
             query_builder = query_builder.gte("rating", min_rating)
@@ -131,8 +157,32 @@ async def search_reviews(query: str, min_rating: Optional[float] = None, max_rat
         
         response = query_builder.execute()
         
-        # 사용자 이름 추가
+        # 컨텐츠 검색 결과와 사용자명 검색 결과를 합치고 중복 제거
+        combined_reviews = {}
+        
+        # 컨텐츠 검색 결과 추가
         for review in response.data:
+            combined_reviews[review["id"]] = review
+            
+        # 사용자명 검색 결과 추가 (중복 제거)
+        for review in user_filtered_reviews:
+            if review["id"] not in combined_reviews:
+                combined_reviews[review["id"]] = review
+        
+        # 리스트로 변환하고 페이지네이션 적용
+        all_reviews = list(combined_reviews.values())
+        
+        # 정렬 적용
+        if sort_by == "view_count":
+            all_reviews.sort(key=lambda x: x.get("view_count", 0), reverse=True)
+        else:
+            all_reviews.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            
+        # 페이지네이션 적용
+        final_reviews = all_reviews[offset:offset + limit]
+        
+        # 사용자 이름 추가
+        for review in final_reviews:
             if review.get("user_id"):
                 user_response = supabase.table("user").select("username").eq("id", review["user_id"]).execute()
                 review["user_name"] = user_response.data[0]["username"] if user_response.data else "알수없음"
@@ -140,8 +190,8 @@ async def search_reviews(query: str, min_rating: Optional[float] = None, max_rat
                 review["user_name"] = "알수없음"
         
         return {
-            "data": response.data,
-            "count": len(response.data)
+            "data": final_reviews,
+            "count": len(final_reviews)
         }
         
     except Exception as e:
@@ -161,6 +211,26 @@ async def search_phishing_sites(query: str, sort_by: str = "created_at", sort_or
                 f"url.ilike.%{query}%,reason.ilike.%{query}%,description.ilike.%{query}%"
             )
         
+        # 작성자명으로도 검색 가능하도록 별도 쿼리로 추가 검색
+        user_filtered_phishing = []
+        if query.strip():
+            # 사용자명으로 검색
+            user_response = supabase.table("user").select("id, username").ilike("username", f"%{query}%").execute()
+            user_ids = [user["id"] for user in user_response.data]
+            
+            if user_ids:
+                # 해당 사용자들의 피싱 신고 가져오기
+                user_phishing_builder = supabase.table("phishing_site").select(
+                    "id, url, reason, description, status, created_at, updated_at, view_count, like_count, dislike_count, user_id"
+                ).in_("user_id", user_ids)
+                
+                # 정렬 적용
+                if sort_by in ["created_at", "view_count"]:
+                    user_phishing_builder = user_phishing_builder.order(sort_by, desc=True)
+                    
+                user_phishing_response = user_phishing_builder.execute()
+                user_filtered_phishing = user_phishing_response.data
+        
         # 정렬
         if sort_by in ["created_at", "view_count"]:
             query_builder = query_builder.order(sort_by, desc=True)
@@ -170,8 +240,32 @@ async def search_phishing_sites(query: str, sort_by: str = "created_at", sort_or
         
         response = query_builder.execute()
         
-        # 사용자 이름 추가
+        # 컨텐츠 검색 결과와 사용자명 검색 결과를 합치고 중복 제거
+        combined_phishing = {}
+        
+        # 컨텐츠 검색 결과 추가
         for site in response.data:
+            combined_phishing[site["id"]] = site
+            
+        # 사용자명 검색 결과 추가 (중복 제거)
+        for site in user_filtered_phishing:
+            if site["id"] not in combined_phishing:
+                combined_phishing[site["id"]] = site
+        
+        # 리스트로 변환하고 페이지네이션 적용
+        all_phishing = list(combined_phishing.values())
+        
+        # 정렬 적용
+        if sort_by == "view_count":
+            all_phishing.sort(key=lambda x: x.get("view_count", 0), reverse=True)
+        else:
+            all_phishing.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            
+        # 페이지네이션 적용
+        final_phishing = all_phishing[offset:offset + limit]
+        
+        # 사용자 이름 추가
+        for site in final_phishing:
             if site.get("user_id"):
                 user_response = supabase.table("user").select("username").eq("id", site["user_id"]).execute()
                 site["user_name"] = user_response.data[0]["username"] if user_response.data else "알수없음"
@@ -179,8 +273,8 @@ async def search_phishing_sites(query: str, sort_by: str = "created_at", sort_or
                 site["user_name"] = "알수없음"
         
         return {
-            "data": response.data,
-            "count": len(response.data)
+            "data": final_phishing,
+            "count": len(final_phishing)
         }
         
     except Exception as e:
@@ -276,7 +370,9 @@ async def unified_search(
         
         # 페이지네이션 계산
         offset = get_offset(pagination.page, pagination.page_size)
-        per_type_limit = pagination.page_size if content_type else pagination.page_size // 3
+        # 통합 검색시에는 모든 결과를 가져와서 정렬 후 페이지네이션 적용
+        # 특정 타입 검색시에는 해당 타입만 검색
+        per_type_limit = pagination.page_size if content_type else 1000  # 통합검색시 충분히 많은 수
         
         posts_data = []
         reviews_data = []
